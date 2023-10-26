@@ -27,9 +27,12 @@
 ##    Synthetic data are drawn from distribution with larger variances and slightly (~20%) 
 ##    off means.
 ##
+## Sources:
+##    https://www.tidymodels.org/start/case-study/
 ## ---------------------------
 library(MASS)
 library(GenOrd)
+library(tidymodels)
 
 #==========================================================================
 set.seed(101)
@@ -68,29 +71,77 @@ corrcheck(marginal) # check ok
 synth_cat2 = (2*ordsample(n, marginal, vcov_cat))-3 # -1 and 1
 
 #==========================================================================
-# logistic regression (not tidymodels)
-# setting 1, logistic regression
 combined_1 = data.frame(rbind(cbind(conf_cont1, "confidential" = 1),
                               cbind(synth_cont1, "confidential" = 0)))
 combined_1$confidential = as.factor(combined_1$confidential)
-model1 <- glm(confidential ~.,family=binomial(link='logit'),data=combined_1)
-prop_scores1 = model1$fitted.values
-
-
-# setting 2, logistic regression
 combined_2 = data.frame(rbind(cbind(conf_cont2, "confidential" = 1),
                               cbind(synth_cont2, "confidential" = 0)))
 combined_2$confidential = as.factor(combined_2$confidential)
-model2 <- glm(confidential ~.,family=binomial(link='logit'),data=combined_2)
-prop_scores2 = model2$fitted.values
 
 # logistic regression (tidymodels)
+lr_mod1 <- logistic_reg(engine = "glm")
+recipe1 <- recipe(confidential ~ .,
+                    data = combined_1)
+lr_workflow1 <- 
+  workflow() %>%  
+  add_model(lr_mod1) %>% 
+  add_recipe(recipe1)
 
-# CART (not tidymodels)
+lr_fit1 = fit(lr_workflow1, data = combined_1)
+lr_vals1 = lr_fit1$fit$fit$fit$fitted.values
+hist(lr_vals1)
+
+lr_mod2 <- logistic_reg(engine = "glm")
+recipe2 <- recipe(confidential ~ ., 
+                     data = combined_2)
+lr_workflow2 <- 
+  workflow() %>%  
+  add_model(lr_mod2) %>% 
+  add_recipe(recipe2)
+
+lr_fit2 = fit(lr_workflow2, data = combined_2)
+lr_vals2 = lr_fit2$fit$fit$fit$fitted.values
+hist(lr_vals2)
 
 # CART(tidymodels)
+# here, I'm seeing that we have to fiddle with cost complexity to balance it
+# out 
+cart_mod1 <- decision_tree(tree_depth = 10, cost_complexity = 0.001) %>% 
+  # This model can be used for classification or regression, so set mode
+  set_mode("classification") %>% 
+  set_engine("rpart")
+cart_workflow1 <- 
+  workflow() %>%
+  add_model(cart_mod1) %>%
+  add_recipe(recipe1)
+cart_fit1 = fit(cart_workflow1, data = combined_1)
+cart_pred1 = as.numeric(predict(cart_fit1, combined_1)$.pred_class)
+
+cart_mod2 <- decision_tree(tree_depth = 5) %>% 
+  # This model can be used for classification or regression, so set mode
+  set_mode("classification") %>% 
+  set_engine("rpart")
+cart_workflow2 <- 
+  workflow() %>%
+  add_model(cart_mod2) %>%
+  add_recipe(recipe2)
+cart_fit2 = fit(cart_workflow2, data = combined_2)
+cart_pred2 = as.numeric(predict(cart_fit2, combined_2)$.pred_class)
+
+
 
 #==========================================================================
+# metrics (pMSE)
+v1_fits = data.frame(cbind("true" = as.numeric(combined_1$confidential)-1, "lr" = lr_vals1, "cart" = cart_pred1-1))
+v2_fits = data.frame(cbind("true" = as.numeric(combined_2$confidential)-1, "lr" = lr_vals2, "cart" = cart_pred2-1))
+
+mean((v1_fits$true-v1_fits$lr)^2)
+mean((v1_fits$true-v1_fits$cart)^2)
+mean((v2_fits$true-v2_fits$lr)^2)
+mean((v2_fits$true-v2_fits$cart)^2)
+
+#==========================================================================
+# Deprecated
 # ggplot(data.frame(prop_scores1), aes(x = prop_scores1))+
 #   geom_density()+
 #   geom_density(data = data.frame(prop_scores2), aes(x = prop_scores2), color = "red")
@@ -105,3 +156,19 @@ prop_scores2 = model2$fitted.values
 # data[1001,] = c(1,0)
 # model = glm(confidential ~.,family=binomial(link='logit'),data=data)
 # prop_scores = model$fitted.values
+# # logistic regression (not tidymodels)
+# # setting 1, logistic regression
+# combined_1 = data.frame(rbind(cbind(conf_cont1, "confidential" = 1),
+#                               cbind(synth_cont1, "confidential" = 0)))
+# combined_1$confidential = as.factor(combined_1$confidential)
+# model1 <- glm(confidential ~.,family=binomial(link='logit'),data=combined_1)
+# prop_scores1 = model1$fitted.values
+# 
+# # setting 2, logistic regression
+# combined_2 = data.frame(rbind(cbind(conf_cont2, "confidential" = 1),
+#                               cbind(synth_cont2, "confidential" = 0)))
+# combined_2$confidential = as.factor(combined_2$confidential)
+# model2 <- glm(confidential ~.,family=binomial(link='logit'),data=combined_2)
+# prop_scores2 = model2$fitted.values
+
+
