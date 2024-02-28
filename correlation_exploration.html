@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.3.450">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>Correlation Exploration</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="correlation_exploration_files/libs/clipboard/clipboard.min.js"></script>
+<script src="correlation_exploration_files/libs/quarto-html/quarto.js"></script>
+<script src="correlation_exploration_files/libs/quarto-html/popper.min.js"></script>
+<script src="correlation_exploration_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="correlation_exploration_files/libs/quarto-html/anchor.min.js"></script>
+<link href="correlation_exploration_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="correlation_exploration_files/libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="correlation_exploration_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="correlation_exploration_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="correlation_exploration_files/libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Correlation Exploration</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+</header>
+
+<p>In this document, I’m trying to understand how to make continuous and categorical datasets that I can compare in a meaningful way with discriminant-based metrics and tree-based models.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(sirt)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>- sirt 3.13-228 (2023-08-11 08:28:44.188123)</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(psych)</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+Attaching package: 'dplyr'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following objects are masked from 'package:stats':
+
+    filter, lag</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following objects are masked from 'package:base':
+
+    intersect, setdiff, setequal, union</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(MASS)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+Attaching package: 'MASS'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following object is masked from 'package:dplyr':
+
+    select</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+Attaching package: 'ggplot2'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following objects are masked from 'package:psych':
+
+    %+%, alpha</code></pre>
+</div>
+</div>
+<section id="exploration-of-tetrachoric-matrix" class="level2">
+<h2 class="anchored" data-anchor-id="exploration-of-tetrachoric-matrix">Exploration of tetrachoric matrix</h2>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>x <span class="ot">=</span> <span class="fu">c</span>(<span class="fu">rep</span>(<span class="dv">0</span>,<span class="dv">50</span>), <span class="fu">rep</span>(<span class="dv">1</span>,<span class="dv">50</span>))<span class="co">#sample(c(0,1), 100,replace = T)</span></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>y <span class="ot">=</span> x <span class="co">#sample(c(0,1), 100,replace = T)</span></span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>data <span class="ot">=</span> <span class="fu">cbind</span>(x, y)</span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>(<span class="dv">100</span><span class="sc">*</span>(<span class="fu">sum</span>(x<span class="sc">==</span><span class="dv">1</span> <span class="sc">&amp;</span> y<span class="sc">==</span><span class="dv">1</span>))<span class="sc">-</span><span class="fu">sum</span>(x<span class="sc">==</span><span class="dv">1</span>)<span class="sc">*</span><span class="fu">sum</span>(y<span class="sc">==</span><span class="dv">1</span>))<span class="sc">/</span><span class="dv">100</span><span class="sc">^</span><span class="dv">2</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 0.25</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>(<span class="dv">100</span><span class="sc">*</span>(<span class="fu">sum</span>(x<span class="sc">==</span><span class="dv">0</span> <span class="sc">&amp;</span> y<span class="sc">==</span><span class="dv">0</span>))<span class="sc">-</span><span class="fu">sum</span>(x<span class="sc">==</span><span class="dv">0</span>)<span class="sc">*</span><span class="fu">sum</span>(y<span class="sc">==</span><span class="dv">0</span>))<span class="sc">/</span><span class="dv">100</span><span class="sc">^</span><span class="dv">2</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 0.25</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(data)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>        x       y
+x 1.00000 0.99999
+y 0.99999 1.00000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="fu">var</span>(data)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>          x         y
+x 0.2525253 0.2525253
+y 0.2525253 0.2525253</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb21"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(data)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  x y
+x 1 1
+y 1 1</code></pre>
+</div>
+</div>
+<p>So we get the same values for our tetrachoric correlation and our underlying correlation.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb23"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a>x <span class="ot">=</span> <span class="fu">c</span>(<span class="fu">rep</span>(<span class="dv">0</span>,<span class="dv">50</span>), <span class="fu">rep</span>(<span class="dv">1</span>,<span class="dv">50</span>))<span class="co">#sample(c(0,1), 100,replace = T)</span></span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a>y <span class="ot">=</span> x <span class="co">#sample(c(0,1), 100,replace = T)</span></span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a>z <span class="ot">=</span> <span class="fu">sample</span>(<span class="fu">c</span>(<span class="dv">0</span>,<span class="dv">1</span>), <span class="dv">100</span>, <span class="at">replace =</span> <span class="dv">1</span>)</span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-6"><a href="#cb23-6" aria-hidden="true" tabindex="-1"></a>data <span class="ot">=</span> <span class="fu">cbind</span>(x, y, z)</span>
+<span id="cb23-7"><a href="#cb23-7" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="st">"variance"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "variance"</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb25"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a>(<span class="dv">100</span><span class="sc">*</span>(<span class="fu">sum</span>(x<span class="sc">==</span><span class="dv">1</span> <span class="sc">&amp;</span> y<span class="sc">==</span><span class="dv">1</span>))<span class="sc">-</span><span class="fu">sum</span>(x<span class="sc">==</span><span class="dv">1</span>)<span class="sc">*</span><span class="fu">sum</span>(y<span class="sc">==</span><span class="dv">1</span>))<span class="sc">/</span><span class="dv">100</span><span class="sc">^</span><span class="dv">2</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 0.25</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb27"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a>(<span class="dv">100</span><span class="sc">*</span>(<span class="fu">sum</span>(x<span class="sc">==</span><span class="dv">0</span> <span class="sc">&amp;</span> y<span class="sc">==</span><span class="dv">0</span>))<span class="sc">-</span><span class="fu">sum</span>(x<span class="sc">==</span><span class="dv">0</span>)<span class="sc">*</span><span class="fu">sum</span>(y<span class="sc">==</span><span class="dv">0</span>))<span class="sc">/</span><span class="dv">100</span><span class="sc">^</span><span class="dv">2</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 0.25</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb29"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="st">"tetrachoric"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "tetrachoric"</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(data)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>          x         y         z
+x 1.0000000 0.9999900 0.1565071
+y 0.9999900 1.0000000 0.1565071
+z 0.1565071 0.1565071 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="st">"correlation"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "correlation"</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb35"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(data)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>        x       y       z
+x 1.00000 1.00000 0.10002
+y 1.00000 1.00000 0.10002
+z 0.10002 0.10002 1.00000</code></pre>
+</div>
+</div>
+<p>Tetrachoric and correlation matrices can be different. It’s not clear to me why they’re different here.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb37"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
+<span id="cb37-2"><a href="#cb37-2" aria-hidden="true" tabindex="-1"></a>xn <span class="ot">=</span> <span class="fu">rnorm</span>(<span class="dv">100</span>)</span>
+<span id="cb37-3"><a href="#cb37-3" aria-hidden="true" tabindex="-1"></a>yn <span class="ot">=</span> <span class="fu">rnorm</span>(<span class="dv">100</span>)</span>
+<span id="cb37-4"><a href="#cb37-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb37-5"><a href="#cb37-5" aria-hidden="true" tabindex="-1"></a>datan <span class="ot">=</span> <span class="fu">cbind</span>(xn,yn)</span>
+<span id="cb37-6"><a href="#cb37-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb37-7"><a href="#cb37-7" aria-hidden="true" tabindex="-1"></a>x <span class="ot">=</span> xn<span class="sc">&gt;</span><span class="dv">0</span></span>
+<span id="cb37-8"><a href="#cb37-8" aria-hidden="true" tabindex="-1"></a>y <span class="ot">=</span> yn<span class="sc">&gt;</span><span class="dv">0</span></span>
+<span id="cb37-9"><a href="#cb37-9" aria-hidden="true" tabindex="-1"></a>data <span class="ot">=</span> <span class="fu">cbind</span>(x,y)</span>
+<span id="cb37-10"><a href="#cb37-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb37-11"><a href="#cb37-11" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="st">"underlying mv normal"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "underlying mv normal"</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb39"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(datan)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>              xn            yn
+xn  1.0000000000 -0.0009943199
+yn -0.0009943199  1.0000000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb41"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="st">"tetrachoric"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "tetrachoric"</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb43"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(data)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>          x         y
+x 1.0000000 0.2843674
+y 0.2843674 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb45"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="st">"correlation"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "correlation"</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb47"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(data)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>          x         y
+x 1.0000000 0.1802068
+y 0.1802068 1.0000000</code></pre>
+</div>
+</div>
+<p>When we have a small number of data points, tetrachoric is more off than correlation to the underlying data.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb49"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
+<span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a>xn <span class="ot">=</span> <span class="fu">rnorm</span>(<span class="dv">10000</span>)</span>
+<span id="cb49-3"><a href="#cb49-3" aria-hidden="true" tabindex="-1"></a>yn <span class="ot">=</span> xn</span>
+<span id="cb49-4"><a href="#cb49-4" aria-hidden="true" tabindex="-1"></a>zn <span class="ot">=</span> <span class="fu">rnorm</span>(<span class="dv">10000</span>) <span class="sc">+</span> xn</span>
+<span id="cb49-5"><a href="#cb49-5" aria-hidden="true" tabindex="-1"></a>datan <span class="ot">=</span> <span class="fu">cbind</span>(xn,yn,zn)</span>
+<span id="cb49-6"><a href="#cb49-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb49-7"><a href="#cb49-7" aria-hidden="true" tabindex="-1"></a>x <span class="ot">=</span> xn<span class="sc">&gt;</span><span class="dv">0</span></span>
+<span id="cb49-8"><a href="#cb49-8" aria-hidden="true" tabindex="-1"></a>y <span class="ot">=</span> yn<span class="sc">&gt;</span><span class="dv">0</span></span>
+<span id="cb49-9"><a href="#cb49-9" aria-hidden="true" tabindex="-1"></a>z <span class="ot">=</span> zn<span class="sc">&gt;</span><span class="dv">0</span></span>
+<span id="cb49-10"><a href="#cb49-10" aria-hidden="true" tabindex="-1"></a>data <span class="ot">=</span> <span class="fu">cbind</span>(x,y, z)</span>
+<span id="cb49-11"><a href="#cb49-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb49-12"><a href="#cb49-12" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(datan)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>          xn        yn        zn
+xn 1.0000000 1.0000000 0.7163387
+yn 1.0000000 1.0000000 0.7163387
+zn 0.7163387 0.7163387 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb51"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(data)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>          x         y         z
+x 1.0000000 0.9999900 0.7041004
+y 0.9999900 1.0000000 0.7041004
+z 0.7041004 0.7041004 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb53"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(data)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>          x         y         z
+x 1.0000000 1.0000000 0.4972353
+y 1.0000000 1.0000000 0.4972353
+z 0.4972353 0.4972353 1.0000000</code></pre>
+</div>
+</div>
+<p>But for larger datasets, tetrachoric is much more similar to the underlying normal distribution’s correlation matrix.</p>
+</section>
+<section id="insights-about-categorical-continuous-comparison" class="level2">
+<h2 class="anchored" data-anchor-id="insights-about-categorical-continuous-comparison">Insights about categorical-continuous comparison</h2>
+<p>So, I think that what we can do to make categorical datasets that are similar to our continuous datasets, for comparison purposes, is to create underlying m.v. normals, which we use for the continuous data, then threshold all of the variables (above 0 -&gt; 1, below 0 -&gt; 0) and use these thresholded values to be our categorical data. I would say this comparison is valid by evaluating the tetrachoric matrix of the categorical data, which generally matches the correlation matrix of the underlying m.v. normal data, because that’s what it is designed to do.</p>
+</section>
+<section id="making-the-datasets-i-want" class="level2">
+<h2 class="anchored" data-anchor-id="making-the-datasets-i-want">Making the datasets I want</h2>
+<p>For this project, there are a few different datasets I want to make to compare model types with. I’m going to try to make all of them here to see if the tetrachoric and correlation matrices are sort of matching what I think they should be. a) Confidential and synthetic dataset are drawn from (for continuous) multivariate normal with known variance-covariance matrix, and from (for categorical) known distribution. Control pairing to test which hyperparameters work best in continuous vs.&nbsp;categorical “ideal” setting.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb55"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a>generate_cat <span class="ot">&lt;-</span> <span class="cf">function</span>(cont){</span>
+<span id="cb55-2"><a href="#cb55-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">matrix</span>(<span class="fu">as.numeric</span>(cont<span class="sc">&gt;</span><span class="dv">0</span>), </span>
+<span id="cb55-3"><a href="#cb55-3" aria-hidden="true" tabindex="-1"></a>             <span class="at">nrow =</span> <span class="fu">nrow</span>(cont))</span>
+<span id="cb55-4"><a href="#cb55-4" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb55-5"><a href="#cb55-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb55-6"><a href="#cb55-6" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
+<span id="cb55-7"><a href="#cb55-7" aria-hidden="true" tabindex="-1"></a>n<span class="ot">=</span><span class="dv">10000</span> <span class="co"># number of samples</span></span>
+<span id="cb55-8"><a href="#cb55-8" aria-hidden="true" tabindex="-1"></a>corr<span class="ot">=</span>.<span class="dv">7</span> <span class="co"># correlation</span></span>
+<span id="cb55-9"><a href="#cb55-9" aria-hidden="true" tabindex="-1"></a>p <span class="ot">=</span> <span class="dv">10</span> <span class="co"># number of variables</span></span>
+<span id="cb55-10"><a href="#cb55-10" aria-hidden="true" tabindex="-1"></a>vcov <span class="ot">=</span> <span class="fu">matrix</span>(corr, p, p) <span class="sc">+</span> <span class="fu">diag</span>(<span class="dv">1</span><span class="sc">-</span>corr, p, p) <span class="co"># vcov matrix, p on all off-diagonal variables</span></span>
+<span id="cb55-11"><a href="#cb55-11" aria-hidden="true" tabindex="-1"></a>means <span class="ot">=</span> <span class="fu">rep</span>(<span class="dv">0</span>,p) <span class="co"># mean vector</span></span>
+<span id="cb55-12"><a href="#cb55-12" aria-hidden="true" tabindex="-1"></a>conf_cont1 <span class="ot">=</span> <span class="fu">mvrnorm</span>(means, vcov, <span class="at">n =</span> n)</span>
+<span id="cb55-13"><a href="#cb55-13" aria-hidden="true" tabindex="-1"></a>synth_cont1 <span class="ot">=</span> <span class="fu">mvrnorm</span>(means, vcov, <span class="at">n =</span> n)</span>
+<span id="cb55-14"><a href="#cb55-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb55-15"><a href="#cb55-15" aria-hidden="true" tabindex="-1"></a>conf_cat1 <span class="ot">=</span> <span class="fu">generate_cat</span>(conf_cont1)</span>
+<span id="cb55-16"><a href="#cb55-16" aria-hidden="true" tabindex="-1"></a>synth_cat1 <span class="ot">=</span> <span class="fu">generate_cat</span>(synth_cont1)</span>
+<span id="cb55-17"><a href="#cb55-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb55-18"><a href="#cb55-18" aria-hidden="true" tabindex="-1"></a><span class="co"># comparing the variances</span></span>
+<span id="cb55-19"><a href="#cb55-19" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(conf_cont1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.6974968 0.7027721 0.7024667 0.7009274 0.7053615 0.7003494
+ [2,] 0.6974968 1.0000000 0.7116407 0.7026437 0.7028519 0.6969649 0.6954804
+ [3,] 0.7027721 0.7116407 1.0000000 0.7062237 0.7041548 0.7071384 0.6990749
+ [4,] 0.7024667 0.7026437 0.7062237 1.0000000 0.7071236 0.7045271 0.6991951
+ [5,] 0.7009274 0.7028519 0.7041548 0.7071236 1.0000000 0.7013362 0.7039690
+ [6,] 0.7053615 0.6969649 0.7071384 0.7045271 0.7013362 1.0000000 0.6935510
+ [7,] 0.7003494 0.6954804 0.6990749 0.6991951 0.7039690 0.6935510 1.0000000
+ [8,] 0.7089120 0.7036960 0.7103763 0.7065404 0.7137144 0.7058396 0.7029797
+ [9,] 0.7020449 0.7033791 0.7058559 0.7085297 0.7129589 0.7066564 0.6958715
+[10,] 0.7057270 0.6998509 0.7055188 0.7010955 0.7115767 0.7046209 0.7053483
+           [,8]      [,9]     [,10]
+ [1,] 0.7089120 0.7020449 0.7057270
+ [2,] 0.7036960 0.7033791 0.6998509
+ [3,] 0.7103763 0.7058559 0.7055188
+ [4,] 0.7065404 0.7085297 0.7010955
+ [5,] 0.7137144 0.7129589 0.7115767
+ [6,] 0.7058396 0.7066564 0.7046209
+ [7,] 0.7029797 0.6958715 0.7053483
+ [8,] 1.0000000 0.7098785 0.7079091
+ [9,] 0.7098785 1.0000000 0.7071360
+[10,] 0.7079091 0.7071360 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb57"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(synth_cont1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.6968231 0.6974992 0.6913405 0.6993676 0.6938628 0.6895215
+ [2,] 0.6968231 1.0000000 0.7046065 0.6947398 0.6964572 0.6969748 0.6930686
+ [3,] 0.6974992 0.7046065 1.0000000 0.6991493 0.6988521 0.6909079 0.6941265
+ [4,] 0.6913405 0.6947398 0.6991493 1.0000000 0.7019206 0.7009778 0.6897412
+ [5,] 0.6993676 0.6964572 0.6988521 0.7019206 1.0000000 0.6957937 0.6917625
+ [6,] 0.6938628 0.6969748 0.6909079 0.7009778 0.6957937 1.0000000 0.6901693
+ [7,] 0.6895215 0.6930686 0.6941265 0.6897412 0.6917625 0.6901693 1.0000000
+ [8,] 0.6924264 0.6973019 0.7011513 0.6936502 0.6945034 0.6901172 0.6912334
+ [9,] 0.6987906 0.6954412 0.6991315 0.6979334 0.6964931 0.6979623 0.6951372
+[10,] 0.6906642 0.6944600 0.7019482 0.6988438 0.7000406 0.6935275 0.6906377
+           [,8]      [,9]     [,10]
+ [1,] 0.6924264 0.6987906 0.6906642
+ [2,] 0.6973019 0.6954412 0.6944600
+ [3,] 0.7011513 0.6991315 0.7019482
+ [4,] 0.6936502 0.6979334 0.6988438
+ [5,] 0.6945034 0.6964931 0.7000406
+ [6,] 0.6901172 0.6979623 0.6935275
+ [7,] 0.6912334 0.6951372 0.6906377
+ [8,] 1.0000000 0.6923695 0.6895730
+ [9,] 0.6923695 1.0000000 0.6970136
+[10,] 0.6895730 0.6970136 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb59"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(conf_cat1)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.6891330 0.7044583 0.7022537 0.7056394 0.7242519 0.6911717
+ [2,] 0.6891330 1.0000000 0.7155496 0.7089995 0.7141484 0.6864521 0.6875103
+ [3,] 0.7044583 0.7155496 1.0000000 0.7111297 0.7122589 0.7049071 0.6997690
+ [4,] 0.7022537 0.7089995 0.7111297 1.0000000 0.7100171 0.7080237 0.6984662
+ [5,] 0.7056394 0.7141484 0.7122589 0.7100171 1.0000000 0.7064859 0.7014344
+ [6,] 0.7242519 0.6864521 0.7049071 0.7080237 0.7064859 1.0000000 0.6811504
+ [7,] 0.6911717 0.6875103 0.6997690 0.6984662 0.7014344 0.6811504 1.0000000
+ [8,] 0.7044472 0.7017571 0.7004370 0.7045008 0.7153904 0.7062571 0.6916166
+ [9,] 0.6880213 0.6935335 0.7060276 0.6861746 0.7146514 0.7015586 0.6800207
+[10,] 0.7095845 0.6942894 0.7184272 0.7034856 0.7236080 0.7180218 0.7110938
+           [,8]      [,9]     [,10]
+ [1,] 0.7044472 0.6880213 0.7095845
+ [2,] 0.7017571 0.6935335 0.6942894
+ [3,] 0.7004370 0.7060276 0.7184272
+ [4,] 0.7045008 0.6861746 0.7034856
+ [5,] 0.7153904 0.7146514 0.7236080
+ [6,] 0.7062571 0.7015586 0.7180218
+ [7,] 0.6916166 0.6800207 0.7110938
+ [8,] 1.0000000 0.6979994 0.6988527
+ [9,] 0.6979994 1.0000000 0.6869841
+[10,] 0.6988527 0.6869841 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb61"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(synth_cat1)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.6847981 0.7014689 0.6919218 0.6923162 0.6836589 0.6854848
+ [2,] 0.6847981 1.0000000 0.6926960 0.6816530 0.6769734 0.6700088 0.6820450
+ [3,] 0.7014689 0.6926960 1.0000000 0.7017615 0.6902032 0.6797700 0.6847168
+ [4,] 0.6919218 0.6816530 0.7017615 1.0000000 0.7040810 0.6919972 0.6869200
+ [5,] 0.6923162 0.6769734 0.6902032 0.7040810 1.0000000 0.6882244 0.6734979
+ [6,] 0.6836589 0.6700088 0.6797700 0.6919972 0.6882244 1.0000000 0.6735015
+ [7,] 0.6854848 0.6820450 0.6847168 0.6869200 0.6734979 0.6735015 1.0000000
+ [8,] 0.6928828 0.6881213 0.7026179 0.7053304 0.6901747 0.6709238 0.6947011
+ [9,] 0.6977598 0.6839083 0.6923568 0.6900514 0.6813844 0.6818833 0.6909800
+[10,] 0.6854926 0.6879993 0.7002528 0.6992290 0.6850277 0.6877434 0.6909594
+           [,8]      [,9]     [,10]
+ [1,] 0.6928828 0.6977598 0.6854926
+ [2,] 0.6881213 0.6839083 0.6879993
+ [3,] 0.7026179 0.6923568 0.7002528
+ [4,] 0.7053304 0.6900514 0.6992290
+ [5,] 0.6901747 0.6813844 0.6850277
+ [6,] 0.6709238 0.6818833 0.6877434
+ [7,] 0.6947011 0.6909800 0.6909594
+ [8,] 1.0000000 0.6850534 0.6934514
+ [9,] 0.6850534 1.0000000 0.6823477
+[10,] 0.6934514 0.6823477 1.0000000</code></pre>
+</div>
+</div>
+<ol start="2" type="a">
+<li>Confidential data are drawn from (for continuous) multivariate normal with known variance-covariance matrix, and from (for categorical) known distribution. Synthetic data are drawn from distribution with larger variances and slightly (~20%) off means.</li>
+</ol>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb63"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a>vcov <span class="ot">=</span> <span class="fu">matrix</span>(corr, p, p) <span class="sc">+</span> <span class="fu">diag</span>(<span class="dv">1</span><span class="sc">-</span>corr, p, p) <span class="co"># vcov matrix, p on all off-diagonal variables</span></span>
+<span id="cb63-2"><a href="#cb63-2" aria-hidden="true" tabindex="-1"></a>means <span class="ot">=</span> <span class="fu">rep</span>(<span class="dv">0</span>,p) <span class="co"># mean vector</span></span>
+<span id="cb63-3"><a href="#cb63-3" aria-hidden="true" tabindex="-1"></a>conf_cont1 <span class="ot">=</span> <span class="fu">mvrnorm</span>(means, vcov, <span class="at">n =</span> n)</span>
+<span id="cb63-4"><a href="#cb63-4" aria-hidden="true" tabindex="-1"></a>means <span class="ot">=</span> <span class="fu">sample</span>(<span class="fu">c</span>(<span class="sc">-</span>.<span class="dv">2</span>,.<span class="dv">2</span>), <span class="dv">10</span>, <span class="at">replace =</span> T) <span class="co"># mean vector</span></span>
+<span id="cb63-5"><a href="#cb63-5" aria-hidden="true" tabindex="-1"></a>vcov <span class="ot">=</span> <span class="fu">matrix</span>(<span class="dv">2</span><span class="sc">*</span>corr, p, p) <span class="sc">+</span> <span class="fu">diag</span>(<span class="dv">4-2</span><span class="sc">*</span>corr, p, p) <span class="co"># vcov matrix, p on all off-diagonal variables</span></span>
+<span id="cb63-6"><a href="#cb63-6" aria-hidden="true" tabindex="-1"></a>synth_cont1 <span class="ot">=</span> <span class="fu">mvrnorm</span>(means, vcov, <span class="at">n =</span> n)</span>
+<span id="cb63-7"><a href="#cb63-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb63-8"><a href="#cb63-8" aria-hidden="true" tabindex="-1"></a>conf_cat1 <span class="ot">=</span> <span class="fu">generate_cat</span>(conf_cont1)</span>
+<span id="cb63-9"><a href="#cb63-9" aria-hidden="true" tabindex="-1"></a>synth_cat1 <span class="ot">=</span> <span class="fu">generate_cat</span>(synth_cont1)</span>
+<span id="cb63-10"><a href="#cb63-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb63-11"><a href="#cb63-11" aria-hidden="true" tabindex="-1"></a><span class="co"># comparing the variances</span></span>
+<span id="cb63-12"><a href="#cb63-12" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(conf_cont1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.7034058 0.7083350 0.6968863 0.7007566 0.7031998 0.7005444
+ [2,] 0.7034058 1.0000000 0.7068142 0.6988498 0.7009123 0.7040730 0.6966323
+ [3,] 0.7083350 0.7068142 1.0000000 0.6948828 0.7042555 0.7004926 0.7015747
+ [4,] 0.6968863 0.6988498 0.6948828 1.0000000 0.6957513 0.6996589 0.6985990
+ [5,] 0.7007566 0.7009123 0.7042555 0.6957513 1.0000000 0.7005129 0.6974082
+ [6,] 0.7031998 0.7040730 0.7004926 0.6996589 0.7005129 1.0000000 0.6946940
+ [7,] 0.7005444 0.6966323 0.7015747 0.6985990 0.6974082 0.6946940 1.0000000
+ [8,] 0.6937284 0.6906135 0.6935492 0.6954221 0.6979467 0.6944413 0.6964612
+ [9,] 0.7044849 0.7036834 0.7012591 0.6930959 0.7000630 0.6972432 0.6971373
+[10,] 0.7043771 0.6978639 0.7002053 0.6941166 0.7031151 0.6964785 0.6953756
+           [,8]      [,9]     [,10]
+ [1,] 0.6937284 0.7044849 0.7043771
+ [2,] 0.6906135 0.7036834 0.6978639
+ [3,] 0.6935492 0.7012591 0.7002053
+ [4,] 0.6954221 0.6930959 0.6941166
+ [5,] 0.6979467 0.7000630 0.7031151
+ [6,] 0.6944413 0.6972432 0.6964785
+ [7,] 0.6964612 0.6971373 0.6953756
+ [8,] 1.0000000 0.6932338 0.6930062
+ [9,] 0.6932338 1.0000000 0.6965170
+[10,] 0.6930062 0.6965170 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb65"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(synth_cont1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.3424584 0.3566527 0.3485270 0.3602998 0.3517682 0.3428050
+ [2,] 0.3424584 1.0000000 0.3565201 0.3602844 0.3735436 0.3677924 0.3672351
+ [3,] 0.3566527 0.3565201 1.0000000 0.3373637 0.3617529 0.3502115 0.3586338
+ [4,] 0.3485270 0.3602844 0.3373637 1.0000000 0.3538037 0.3552028 0.3467765
+ [5,] 0.3602998 0.3735436 0.3617529 0.3538037 1.0000000 0.3648034 0.3532337
+ [6,] 0.3517682 0.3677924 0.3502115 0.3552028 0.3648034 1.0000000 0.3635405
+ [7,] 0.3428050 0.3672351 0.3586338 0.3467765 0.3532337 0.3635405 1.0000000
+ [8,] 0.3482039 0.3630279 0.3661504 0.3550678 0.3544616 0.3643967 0.3544431
+ [9,] 0.3517918 0.3626294 0.3562088 0.3450588 0.3538852 0.3531032 0.3521171
+[10,] 0.3417326 0.3649513 0.3485135 0.3441717 0.3544323 0.3534649 0.3490416
+           [,8]      [,9]     [,10]
+ [1,] 0.3482039 0.3517918 0.3417326
+ [2,] 0.3630279 0.3626294 0.3649513
+ [3,] 0.3661504 0.3562088 0.3485135
+ [4,] 0.3550678 0.3450588 0.3441717
+ [5,] 0.3544616 0.3538852 0.3544323
+ [6,] 0.3643967 0.3531032 0.3534649
+ [7,] 0.3544431 0.3521171 0.3490416
+ [8,] 1.0000000 0.3565960 0.3418314
+ [9,] 0.3565960 1.0000000 0.3423055
+[10,] 0.3418314 0.3423055 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb67"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(conf_cat1)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.7047546 0.7187061 0.7041570 0.7070638 0.7061332 0.7041674
+ [2,] 0.7047546 1.0000000 0.7144112 0.6968940 0.7006994 0.7048429 0.7036099
+ [3,] 0.7187061 0.7144112 1.0000000 0.7057174 0.7099650 0.7049340 0.7097393
+ [4,] 0.7041570 0.6968940 0.7057174 1.0000000 0.7059560 0.7045963 0.7119377
+ [5,] 0.7070638 0.7006994 0.7099650 0.7059560 1.0000000 0.7088454 0.7077392
+ [6,] 0.7061332 0.7048429 0.7049340 0.7045963 0.7088454 1.0000000 0.7063991
+ [7,] 0.7041674 0.7036099 0.7097393 0.7119377 0.7077392 0.7063991 1.0000000
+ [8,] 0.6876740 0.6779752 0.6919716 0.7023682 0.7088385 0.7228361 0.7032736
+ [9,] 0.7079832 0.7144420 0.7100303 0.6947690 0.7044216 0.7008760 0.7001716
+[10,] 0.7138572 0.6893677 0.6954944 0.7016284 0.7212624 0.7033097 0.6921505
+           [,8]      [,9]     [,10]
+ [1,] 0.6876740 0.7079832 0.7138572
+ [2,] 0.6779752 0.7144420 0.6893677
+ [3,] 0.6919716 0.7100303 0.6954944
+ [4,] 0.7023682 0.6947690 0.7016284
+ [5,] 0.7088385 0.7044216 0.7212624
+ [6,] 0.7228361 0.7008760 0.7033097
+ [7,] 0.7032736 0.7001716 0.6921505
+ [8,] 1.0000000 0.6999515 0.7041118
+ [9,] 0.6999515 1.0000000 0.7062715
+[10,] 0.7041118 0.7062715 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb69"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(synth_cat1)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.3382107 0.3568544 0.3335299 0.3649235 0.3583505 0.3206281
+ [2,] 0.3382107 1.0000000 0.3733464 0.3653840 0.3883133 0.3901931 0.3552599
+ [3,] 0.3568544 0.3733464 1.0000000 0.3316122 0.3534199 0.3537417 0.3703317
+ [4,] 0.3335299 0.3653840 0.3316122 1.0000000 0.3629276 0.3606922 0.3458345
+ [5,] 0.3649235 0.3883133 0.3534199 0.3629276 1.0000000 0.3731029 0.3486078
+ [6,] 0.3583505 0.3901931 0.3537417 0.3606922 0.3731029 1.0000000 0.3562881
+ [7,] 0.3206281 0.3552599 0.3703317 0.3458345 0.3486078 0.3562881 1.0000000
+ [8,] 0.3469000 0.3599824 0.3716406 0.3636288 0.3509283 0.3694084 0.3435573
+ [9,] 0.3624925 0.3724654 0.3333749 0.3337429 0.3475528 0.3561092 0.3478489
+[10,] 0.3450783 0.3667313 0.3517216 0.3441622 0.3639605 0.3405176 0.3456948
+           [,8]      [,9]     [,10]
+ [1,] 0.3469000 0.3624925 0.3450783
+ [2,] 0.3599824 0.3724654 0.3667313
+ [3,] 0.3716406 0.3333749 0.3517216
+ [4,] 0.3636288 0.3337429 0.3441622
+ [5,] 0.3509283 0.3475528 0.3639605
+ [6,] 0.3694084 0.3561092 0.3405176
+ [7,] 0.3435573 0.3478489 0.3456948
+ [8,] 1.0000000 0.3645403 0.3351121
+ [9,] 0.3645403 1.0000000 0.3265918
+[10,] 0.3351121 0.3265918 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb71"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(conf_cont1), <span class="fu">aes</span>(<span class="at">x=</span>X1, <span class="at">y=</span>X2))<span class="sc">+</span></span>
+<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>()<span class="sc">+</span></span>
+<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_classic</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="correlation_exploration_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid" width="672"></p>
+</div>
+<div class="sourceCode cell-code" id="cb72"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(synth_cont1), <span class="fu">aes</span>(<span class="at">x =</span> X1, <span class="at">y =</span> X2))<span class="sc">+</span></span>
+<span id="cb72-2"><a href="#cb72-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>()<span class="sc">+</span></span>
+<span id="cb72-3"><a href="#cb72-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_classic</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="correlation_exploration_files/figure-html/unnamed-chunk-7-2.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<ol start="3" type="a">
+<li>Confidential dataset is multivariate normal or has a known joint categorical distribution, and the synthetic dataset has a known mismatch in distributional coverage. One variable for the continuous dataset will be centered at a different value in the synthetic vs.&nbsp;confidential data, and one variable for the categorical dataset will have a drastically different distribution across categories in the synthetic vs.&nbsp;confidential data. Pairing to test whether methods are able to pick up this mismatch and on which types of datasets.</li>
+</ol>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb73"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a>vcov <span class="ot">=</span> <span class="fu">matrix</span>(corr, p, p) <span class="sc">+</span> <span class="fu">diag</span>(<span class="dv">1</span><span class="sc">-</span>corr, p, p) <span class="co"># vcov matrix, p on all off-diagonal variables</span></span>
+<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a>means <span class="ot">=</span> <span class="fu">rep</span>(<span class="dv">0</span>,p) <span class="co"># mean vector</span></span>
+<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a>conf_cont1 <span class="ot">=</span> <span class="fu">mvrnorm</span>(means, vcov, <span class="at">n =</span> n)</span>
+<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a>means[<span class="dv">1</span>] <span class="ot">=</span> <span class="dv">3</span></span>
+<span id="cb73-5"><a href="#cb73-5" aria-hidden="true" tabindex="-1"></a>synth_cont1 <span class="ot">=</span> <span class="fu">mvrnorm</span>(means, vcov, <span class="at">n =</span> n)</span>
+<span id="cb73-6"><a href="#cb73-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-7"><a href="#cb73-7" aria-hidden="true" tabindex="-1"></a>conf_cat1 <span class="ot">=</span> <span class="fu">generate_cat</span>(conf_cont1)</span>
+<span id="cb73-8"><a href="#cb73-8" aria-hidden="true" tabindex="-1"></a>synth_cat1 <span class="ot">=</span> <span class="fu">generate_cat</span>(synth_cont1)</span>
+<span id="cb73-9"><a href="#cb73-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-10"><a href="#cb73-10" aria-hidden="true" tabindex="-1"></a><span class="co"># comparing the variances</span></span>
+<span id="cb73-11"><a href="#cb73-11" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(synth_cat1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>            [,1]       [,2]       [,3]       [,4]       [,5]       [,6]
+ [1,] 1.00000000 0.04106854 0.04113431 0.04055426 0.04121666 0.04135703
+ [2,] 0.04106854 1.00000000 0.49039280 0.50619894 0.48600019 0.48301729
+ [3,] 0.04113431 0.49039280 1.00000000 0.48462017 0.49399904 0.48701071
+ [4,] 0.04055426 0.50619894 0.48462017 1.00000000 0.49305412 0.47411120
+ [5,] 0.04121666 0.48600019 0.49399904 0.49305412 1.00000000 0.48900418
+ [6,] 0.04135703 0.48301729 0.48701071 0.47411120 0.48900418 1.00000000
+ [7,] 0.04106854 0.48958824 0.49919295 0.48699582 0.50840046 0.48981739
+ [8,] 0.04098649 0.49278443 0.49679227 0.48976715 0.50080378 0.49262754
+ [9,] 0.04073313 0.49618525 0.49860309 0.47908681 0.49142628 0.49247141
+[10,] 0.04156434 0.48885286 0.48363805 0.48881195 0.49762190 0.48659795
+            [,7]       [,8]       [,9]      [,10]
+ [1,] 0.04106854 0.04098649 0.04073313 0.04156434
+ [2,] 0.48958824 0.49278443 0.49618525 0.48885286
+ [3,] 0.49919295 0.49679227 0.49860309 0.48363805
+ [4,] 0.48699582 0.48976715 0.47908681 0.48881195
+ [5,] 0.50840046 0.50080378 0.49142628 0.49762190
+ [6,] 0.48981739 0.49262754 0.49247141 0.48659795
+ [7,] 1.00000000 0.49398447 0.49298494 0.49405306
+ [8,] 0.49398447 1.00000000 0.49736513 0.48487274
+ [9,] 0.49298494 0.49736513 1.00000000 0.48034664
+[10,] 0.49405306 0.48487274 0.48034664 1.00000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb75"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(synth_cat1)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.5137690 0.5142402 0.5100534 0.5148289 0.5158292 0.5137690
+ [2,] 0.5137690 1.0000000 0.6963842 0.7140360 0.6914176 0.6880327 0.6954767
+ [3,] 0.5142402 0.6963842 1.0000000 0.6899049 0.7004365 0.6925666 0.7062369
+ [4,] 0.5100534 0.7140360 0.6899049 1.0000000 0.6994497 0.6778968 0.6925932
+ [5,] 0.5148289 0.6914176 0.7004365 0.6994497 1.0000000 0.6948178 0.7164047
+ [6,] 0.5158292 0.6880327 0.6925666 0.6778968 0.6948178 1.0000000 0.6957453
+ [7,] 0.5137690 0.6954767 0.7062369 0.6925932 0.7164047 0.6957453 1.0000000
+ [8,] 0.5131799 0.6990776 0.7035655 0.6957182 0.7080335 0.6989177 0.7004229
+ [9,] 0.5113520 0.7029064 0.7056090 0.6835547 0.6975855 0.6987817 0.6993228
+[10,] 0.5172991 0.6946794 0.6887546 0.6947485 0.7045042 0.6921000 0.7005317
+           [,8]      [,9]     [,10]
+ [1,] 0.5131799 0.5113520 0.5172991
+ [2,] 0.6990776 0.7029064 0.6946794
+ [3,] 0.7035655 0.7056090 0.6887546
+ [4,] 0.6957182 0.6835547 0.6947485
+ [5,] 0.7080335 0.6975855 0.7045042
+ [6,] 0.6989177 0.6987817 0.6921000
+ [7,] 0.7004229 0.6993228 0.7005317
+ [8,] 1.0000000 0.7042181 0.6901804
+ [9,] 0.7042181 1.0000000 0.6850684
+[10,] 0.6901804 0.6850684 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb77"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(conf_cont1), <span class="fu">aes</span>(<span class="at">x =</span> X1))<span class="sc">+</span></span>
+<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_histogram</span>()<span class="sc">+</span></span>
+<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_histogram</span>(<span class="at">data =</span> <span class="fu">data.frame</span>(synth_cont1), <span class="fu">aes</span>(<span class="at">x =</span> X1), <span class="at">fill =</span> <span class="st">"red"</span>, <span class="at">alpha =</span> .<span class="dv">5</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>`stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+`stat_bin()` using `bins = 30`. Pick better value with `binwidth`.</code></pre>
+</div>
+<div class="cell-output-display">
+<p><img src="correlation_exploration_files/figure-html/unnamed-chunk-8-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>In this section, we see that for the first time, the tetrachoric correlation matrix doesn’t match the correlation matrix of the underlying normal distribution. If we did the thresholding at 3 for X1, then the tetrachoric correlation matrix would match the underlying correlation matrix, but obviously now the synthetic and confidential datasets would be the same at this point because we’ve centered the 0’s and 1’s. So I’m not sure, in this pairing of datasets, how to make sure that the synthetic and confidential datasets have different means without affecting tetrachoric correlation. It seems to be most affected at the extremes of the data, so only when we make the mean of our incorrect variable really high (3) compared to standard deviation (1). I think to get around this, I’ll set the mean at 2.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb79"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb79-1"><a href="#cb79-1" aria-hidden="true" tabindex="-1"></a>vcov <span class="ot">=</span> <span class="fu">matrix</span>(corr, p, p) <span class="sc">+</span> <span class="fu">diag</span>(<span class="dv">1</span><span class="sc">-</span>corr, p, p) <span class="co"># vcov matrix, p on all off-diagonal variables</span></span>
+<span id="cb79-2"><a href="#cb79-2" aria-hidden="true" tabindex="-1"></a>means <span class="ot">=</span> <span class="fu">rep</span>(<span class="dv">0</span>,p) <span class="co"># mean vector</span></span>
+<span id="cb79-3"><a href="#cb79-3" aria-hidden="true" tabindex="-1"></a>conf_cont1 <span class="ot">=</span> <span class="fu">mvrnorm</span>(means, vcov, <span class="at">n =</span> n)</span>
+<span id="cb79-4"><a href="#cb79-4" aria-hidden="true" tabindex="-1"></a>means[<span class="dv">1</span>] <span class="ot">=</span> <span class="dv">2</span></span>
+<span id="cb79-5"><a href="#cb79-5" aria-hidden="true" tabindex="-1"></a>synth_cont1 <span class="ot">=</span> <span class="fu">mvrnorm</span>(means, vcov, <span class="at">n =</span> n)</span>
+<span id="cb79-6"><a href="#cb79-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb79-7"><a href="#cb79-7" aria-hidden="true" tabindex="-1"></a>conf_cat1 <span class="ot">=</span> <span class="fu">generate_cat</span>(conf_cont1)</span>
+<span id="cb79-8"><a href="#cb79-8" aria-hidden="true" tabindex="-1"></a>synth_cat1 <span class="ot">=</span> <span class="fu">generate_cat</span>(synth_cont1)</span>
+<span id="cb79-9"><a href="#cb79-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb79-10"><a href="#cb79-10" aria-hidden="true" tabindex="-1"></a><span class="co"># comparing the variances</span></span>
+<span id="cb79-11"><a href="#cb79-11" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(conf_cont1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.6955100 0.6939337 0.6919517 0.6938891 0.6962013 0.6976009
+ [2,] 0.6955100 1.0000000 0.6918262 0.6945787 0.7062627 0.7013618 0.6999855
+ [3,] 0.6939337 0.6918262 1.0000000 0.6896225 0.6932247 0.6970984 0.6954646
+ [4,] 0.6919517 0.6945787 0.6896225 1.0000000 0.6984277 0.6940838 0.6919894
+ [5,] 0.6938891 0.7062627 0.6932247 0.6984277 1.0000000 0.7001430 0.7012308
+ [6,] 0.6962013 0.7013618 0.6970984 0.6940838 0.7001430 1.0000000 0.6977998
+ [7,] 0.6976009 0.6999855 0.6954646 0.6919894 0.7012308 0.6977998 1.0000000
+ [8,] 0.6955841 0.6983343 0.6953879 0.6983644 0.6983813 0.7018217 0.6966341
+ [9,] 0.6931415 0.7003600 0.6931604 0.6963021 0.6950804 0.6999445 0.6985455
+[10,] 0.6950496 0.6899839 0.6994004 0.6972251 0.6933571 0.6997866 0.6912522
+           [,8]      [,9]     [,10]
+ [1,] 0.6955841 0.6931415 0.6950496
+ [2,] 0.6983343 0.7003600 0.6899839
+ [3,] 0.6953879 0.6931604 0.6994004
+ [4,] 0.6983644 0.6963021 0.6972251
+ [5,] 0.6983813 0.6950804 0.6933571
+ [6,] 0.7018217 0.6999445 0.6997866
+ [7,] 0.6966341 0.6985455 0.6912522
+ [8,] 1.0000000 0.7031142 0.6986119
+ [9,] 0.7031142 1.0000000 0.7005901
+[10,] 0.6986119 0.7005901 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb81"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb81-1"><a href="#cb81-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(synth_cont1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.7021268 0.7040612 0.6977002 0.6934495 0.6915078 0.6985267
+ [2,] 0.7021268 1.0000000 0.6972513 0.6989543 0.6956207 0.6997747 0.7052990
+ [3,] 0.7040612 0.6972513 1.0000000 0.6986594 0.7002234 0.6960926 0.6991761
+ [4,] 0.6977002 0.6989543 0.6986594 1.0000000 0.7008642 0.6943868 0.6958461
+ [5,] 0.6934495 0.6956207 0.7002234 0.7008642 1.0000000 0.6959718 0.7013898
+ [6,] 0.6915078 0.6997747 0.6960926 0.6943868 0.6959718 1.0000000 0.6990462
+ [7,] 0.6985267 0.7052990 0.6991761 0.6958461 0.7013898 0.6990462 1.0000000
+ [8,] 0.7001528 0.7043440 0.7065676 0.7034815 0.6984665 0.6960470 0.6988117
+ [9,] 0.7016301 0.7038357 0.6991475 0.7004759 0.6998289 0.6956946 0.6976203
+[10,] 0.6978416 0.7005425 0.7013443 0.6934288 0.6993098 0.7034374 0.7013094
+           [,8]      [,9]     [,10]
+ [1,] 0.7001528 0.7016301 0.6978416
+ [2,] 0.7043440 0.7038357 0.7005425
+ [3,] 0.7065676 0.6991475 0.7013443
+ [4,] 0.7034815 0.7004759 0.6934288
+ [5,] 0.6984665 0.6998289 0.6993098
+ [6,] 0.6960470 0.6956946 0.7034374
+ [7,] 0.6988117 0.6976203 0.7013094
+ [8,] 1.0000000 0.6987065 0.7057499
+ [9,] 0.6987065 1.0000000 0.6990376
+[10,] 0.7057499 0.6990376 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb83"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb83-1"><a href="#cb83-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(conf_cat1)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.6998546 0.7043493 0.6800047 0.7032227 0.7029798 0.6943126
+ [2,] 0.6998546 1.0000000 0.6959358 0.6893624 0.7129425 0.7057924 0.6841221
+ [3,] 0.7043493 0.6959358 1.0000000 0.6866312 0.6910304 0.7026717 0.6827555
+ [4,] 0.6800047 0.6893624 0.6866312 1.0000000 0.6975231 0.6838784 0.6792680
+ [5,] 0.7032227 0.7129425 0.6910304 0.6975231 1.0000000 0.7045100 0.7128354
+ [6,] 0.7029798 0.7057924 0.7026717 0.6838784 0.7045100 1.0000000 0.6945872
+ [7,] 0.6943126 0.6841221 0.6827555 0.6792680 0.7128354 0.6945872 1.0000000
+ [8,] 0.7069640 0.7057920 0.7053502 0.6970535 0.7027005 0.7057904 0.7013235
+ [9,] 0.6923577 0.6988606 0.6866303 0.6886695 0.6993293 0.7033380 0.6947949
+[10,] 0.6923612 0.6950634 0.7058186 0.6939590 0.6952443 0.7137957 0.7000921
+           [,8]      [,9]     [,10]
+ [1,] 0.7069640 0.6923577 0.6923612
+ [2,] 0.7057920 0.6988606 0.6950634
+ [3,] 0.7053502 0.6866303 0.7058186
+ [4,] 0.6970535 0.6886695 0.6939590
+ [5,] 0.7027005 0.6993293 0.6952443
+ [6,] 0.7057904 0.7033380 0.7137957
+ [7,] 0.7013235 0.6947949 0.7000921
+ [8,] 1.0000000 0.6957012 0.7009269
+ [9,] 0.6957012 1.0000000 0.7002607
+[10,] 0.7009269 0.7002607 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb85"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb85-1"><a href="#cb85-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(synth_cat1)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.6809119 0.7494221 0.7090809 0.7112925 0.7058071 0.7462917
+ [2,] 0.6809119 1.0000000 0.6850554 0.6964170 0.6892734 0.6970630 0.6946226
+ [3,] 0.7494221 0.6850554 1.0000000 0.6971540 0.6983580 0.6927515 0.6871477
+ [4,] 0.7090809 0.6964170 0.6971540 1.0000000 0.6977663 0.6908179 0.6927712
+ [5,] 0.7112925 0.6892734 0.6983580 0.6977663 1.0000000 0.6868916 0.6977508
+ [6,] 0.7058071 0.6970630 0.6927515 0.6908179 0.6868916 1.0000000 0.6867391
+ [7,] 0.7462917 0.6946226 0.6871477 0.6927712 0.6977508 0.6867391 1.0000000
+ [8,] 0.7438965 0.6968307 0.6937697 0.6991360 0.7041931 0.6852369 0.7036293
+ [9,] 0.7122857 0.7019862 0.6933499 0.6901086 0.6867982 0.6731643 0.6932634
+[10,] 0.6774105 0.6912292 0.7047007 0.6968136 0.6952633 0.7026257 0.7004445
+           [,8]      [,9]     [,10]
+ [1,] 0.7438965 0.7122857 0.6774105
+ [2,] 0.6968307 0.7019862 0.6912292
+ [3,] 0.6937697 0.6933499 0.7047007
+ [4,] 0.6991360 0.6901086 0.6968136
+ [5,] 0.7041931 0.6867982 0.6952633
+ [6,] 0.6852369 0.6731643 0.7026257
+ [7,] 0.7036293 0.6932634 0.7004445
+ [8,] 1.0000000 0.6961988 0.7042449
+ [9,] 0.6961988 1.0000000 0.7057241
+[10,] 0.7042449 0.7057241 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb87"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb87-1"><a href="#cb87-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(conf_cont1), <span class="fu">aes</span>(<span class="at">x=</span>X1, <span class="at">y=</span>X2))<span class="sc">+</span></span>
+<span id="cb87-2"><a href="#cb87-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>()<span class="sc">+</span></span>
+<span id="cb87-3"><a href="#cb87-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_classic</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="correlation_exploration_files/figure-html/unnamed-chunk-9-1.png" class="img-fluid" width="672"></p>
+</div>
+<div class="sourceCode cell-code" id="cb88"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb88-1"><a href="#cb88-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(synth_cont1), <span class="fu">aes</span>(<span class="at">x =</span> X1, <span class="at">y =</span> X2))<span class="sc">+</span></span>
+<span id="cb88-2"><a href="#cb88-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>()<span class="sc">+</span></span>
+<span id="cb88-3"><a href="#cb88-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_classic</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="correlation_exploration_files/figure-html/unnamed-chunk-9-2.png" class="img-fluid" width="672"></p>
+</div>
+<div class="sourceCode cell-code" id="cb89"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb89-1"><a href="#cb89-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(conf_cont1), <span class="fu">aes</span>(<span class="at">x =</span> X1))<span class="sc">+</span></span>
+<span id="cb89-2"><a href="#cb89-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_histogram</span>()<span class="sc">+</span></span>
+<span id="cb89-3"><a href="#cb89-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_histogram</span>(<span class="at">data =</span> <span class="fu">data.frame</span>(synth_cont1), <span class="fu">aes</span>(<span class="at">x =</span> X1), <span class="at">fill =</span> <span class="st">"red"</span>, <span class="at">alpha =</span> .<span class="dv">5</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>`stat_bin()` using `bins = 30`. Pick better value with `binwidth`.
+`stat_bin()` using `bins = 30`. Pick better value with `binwidth`.</code></pre>
+</div>
+<div class="cell-output-display">
+<p><img src="correlation_exploration_files/figure-html/unnamed-chunk-9-3.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<ol start="4" type="a">
+<li>A relationship between two variables is reversed in the confidential vs.&nbsp;synthetic datasets. Pairing to test whether methods can pick up that there is an incorrect association between two variables.</li>
+</ol>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb91"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb91-1"><a href="#cb91-1" aria-hidden="true" tabindex="-1"></a>vcov <span class="ot">=</span> <span class="fu">matrix</span>(corr, p, p) <span class="sc">+</span> <span class="fu">diag</span>(<span class="dv">1</span><span class="sc">-</span>corr, p, p) <span class="co"># vcov matrix, p on all off-diagonal variables</span></span>
+<span id="cb91-2"><a href="#cb91-2" aria-hidden="true" tabindex="-1"></a>means <span class="ot">=</span> <span class="fu">rep</span>(<span class="dv">0</span>,p) <span class="co"># mean vector</span></span>
+<span id="cb91-3"><a href="#cb91-3" aria-hidden="true" tabindex="-1"></a>conf_cont1 <span class="ot">=</span> <span class="fu">mvrnorm</span>(means, vcov, <span class="at">n =</span> n)</span>
+<span id="cb91-4"><a href="#cb91-4" aria-hidden="true" tabindex="-1"></a>vcov[<span class="dv">1</span>,<span class="dv">2</span><span class="sc">:</span>p] <span class="ot">=</span> <span class="sc">-</span><span class="fu">rep</span>(corr, p<span class="dv">-1</span>)</span>
+<span id="cb91-5"><a href="#cb91-5" aria-hidden="true" tabindex="-1"></a>vcov[<span class="dv">2</span><span class="sc">:</span>p,<span class="dv">1</span>] <span class="ot">=</span> <span class="sc">-</span><span class="fu">rep</span>(corr, p<span class="dv">-1</span>)</span>
+<span id="cb91-6"><a href="#cb91-6" aria-hidden="true" tabindex="-1"></a>synth_cont1 <span class="ot">=</span> <span class="fu">mvrnorm</span>(means, vcov, <span class="at">n =</span> n)</span>
+<span id="cb91-7"><a href="#cb91-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb91-8"><a href="#cb91-8" aria-hidden="true" tabindex="-1"></a>conf_cat1 <span class="ot">=</span> <span class="fu">generate_cat</span>(conf_cont1)</span>
+<span id="cb91-9"><a href="#cb91-9" aria-hidden="true" tabindex="-1"></a>synth_cat1 <span class="ot">=</span> <span class="fu">generate_cat</span>(synth_cont1)</span>
+<span id="cb91-10"><a href="#cb91-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb91-11"><a href="#cb91-11" aria-hidden="true" tabindex="-1"></a><span class="co"># comparing the variances</span></span>
+<span id="cb91-12"><a href="#cb91-12" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(conf_cont1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.7003262 0.6986662 0.6995895 0.6912450 0.7006500 0.6952916
+ [2,] 0.7003262 1.0000000 0.7013697 0.6997475 0.6941494 0.7032220 0.7044207
+ [3,] 0.6986662 0.7013697 1.0000000 0.6965755 0.6975795 0.7004237 0.6966997
+ [4,] 0.6995895 0.6997475 0.6965755 1.0000000 0.6937072 0.7033942 0.6988030
+ [5,] 0.6912450 0.6941494 0.6975795 0.6937072 1.0000000 0.6948086 0.6964115
+ [6,] 0.7006500 0.7032220 0.7004237 0.7033942 0.6948086 1.0000000 0.6938903
+ [7,] 0.6952916 0.7044207 0.6966997 0.6988030 0.6964115 0.6938903 1.0000000
+ [8,] 0.6936738 0.7002408 0.6951592 0.6911967 0.6898068 0.7035847 0.7021316
+ [9,] 0.6978839 0.7077537 0.6987143 0.6986291 0.6898649 0.6987119 0.6992144
+[10,] 0.6912741 0.7037171 0.6944058 0.6995116 0.6886680 0.7022556 0.6994875
+           [,8]      [,9]     [,10]
+ [1,] 0.6936738 0.6978839 0.6912741
+ [2,] 0.7002408 0.7077537 0.7037171
+ [3,] 0.6951592 0.6987143 0.6944058
+ [4,] 0.6911967 0.6986291 0.6995116
+ [5,] 0.6898068 0.6898649 0.6886680
+ [6,] 0.7035847 0.6987119 0.7022556
+ [7,] 0.7021316 0.6992144 0.6994875
+ [8,] 1.0000000 0.7014371 0.6955954
+ [9,] 0.7014371 1.0000000 0.7014907
+[10,] 0.6955954 0.7014907 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb93"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb93-1"><a href="#cb93-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(synth_cont1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>            [,1]       [,2]       [,3]       [,4]       [,5]       [,6]
+ [1,]  1.0000000 -0.6924628 -0.6980556 -0.7003031 -0.6996094 -0.6966513
+ [2,] -0.6924628  1.0000000  0.7013345  0.6973539  0.7069766  0.6899767
+ [3,] -0.6980556  0.7013345  1.0000000  0.6990113  0.7091324  0.6940077
+ [4,] -0.7003031  0.6973539  0.6990113  1.0000000  0.6960076  0.6978694
+ [5,] -0.6996094  0.7069766  0.7091324  0.6960076  1.0000000  0.6990133
+ [6,] -0.6966513  0.6899767  0.6940077  0.6978694  0.6990133  1.0000000
+ [7,] -0.6953438  0.6962796  0.7021950  0.6955607  0.6970197  0.6949774
+ [8,] -0.6947307  0.6966258  0.7016861  0.6972811  0.6992546  0.6885153
+ [9,] -0.6954388  0.6977539  0.7015809  0.7004715  0.7029307  0.6948101
+[10,] -0.6971402  0.6946323  0.7008071  0.6973515  0.6997954  0.6948447
+            [,7]       [,8]       [,9]      [,10]
+ [1,] -0.6953438 -0.6947307 -0.6954388 -0.6971402
+ [2,]  0.6962796  0.6966258  0.6977539  0.6946323
+ [3,]  0.7021950  0.7016861  0.7015809  0.7008071
+ [4,]  0.6955607  0.6972811  0.7004715  0.6973515
+ [5,]  0.6970197  0.6992546  0.7029307  0.6997954
+ [6,]  0.6949774  0.6885153  0.6948101  0.6948447
+ [7,]  1.0000000  0.6953061  0.6967796  0.6972051
+ [8,]  0.6953061  1.0000000  0.6903678  0.6992184
+ [9,]  0.6967796  0.6903678  1.0000000  0.6961881
+[10,]  0.6972051  0.6992184  0.6961881  1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb95"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb95-1"><a href="#cb95-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(conf_cat1)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.6994940 0.6914966 0.7145450 0.6877012 0.6991186 0.7023060
+ [2,] 0.6994940 1.0000000 0.7015019 0.7003795 0.6999370 0.6963669 0.6998793
+ [3,] 0.6914966 0.7015019 1.0000000 0.6996645 0.6924735 0.7037968 0.6988785
+ [4,] 0.7145450 0.7003795 0.6996645 1.0000000 0.6949665 0.7088959 0.7017375
+ [5,] 0.6877012 0.6999370 0.6924735 0.6949665 1.0000000 0.6990698 0.6972012
+ [6,] 0.6991186 0.6963669 0.7037968 0.7088959 0.6990698 1.0000000 0.6894305
+ [7,] 0.7023060 0.6998793 0.6988785 0.7017375 0.6972012 0.6894305 1.0000000
+ [8,] 0.6933737 0.7031535 0.6830704 0.6869274 0.6955297 0.6954955 0.7055914
+ [9,] 0.6977775 0.7073313 0.6971410 0.6892598 0.6856580 0.7034115 0.7003720
+[10,] 0.6907804 0.7024380 0.6909803 0.7055785 0.6820383 0.7024359 0.6928250
+           [,8]      [,9]     [,10]
+ [1,] 0.6933737 0.6977775 0.6907804
+ [2,] 0.7031535 0.7073313 0.7024380
+ [3,] 0.6830704 0.6971410 0.6909803
+ [4,] 0.6869274 0.6892598 0.7055785
+ [5,] 0.6955297 0.6856580 0.6820383
+ [6,] 0.6954955 0.7034115 0.7024359
+ [7,] 0.7055914 0.7003720 0.6928250
+ [8,] 1.0000000 0.7084529 0.6948141
+ [9,] 0.7084529 1.0000000 0.6982837
+[10,] 0.6948141 0.6982837 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb97"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb97-1"><a href="#cb97-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(synth_cat1)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>            [,1]       [,2]       [,3]       [,4]       [,5]       [,6]
+ [1,]  1.0000000 -0.6956306 -0.6953801 -0.6978834 -0.6917425 -0.6979145
+ [2,] -0.6956306  1.0000000  0.6983592  0.6989802  0.7218904  0.6912588
+ [3,] -0.6953801  0.6983592  1.0000000  0.6952023  0.7219853  0.6934245
+ [4,] -0.6978834  0.6989802  0.6952023  1.0000000  0.6933943  0.6877401
+ [5,] -0.6917425  0.7218904  0.7219853  0.6933943  1.0000000  0.6957022
+ [6,] -0.6979145  0.6912588  0.6934245  0.6877401  0.6957022  1.0000000
+ [7,] -0.6993295  0.6957391  0.7131445  0.6982056  0.7100969  0.7057981
+ [8,] -0.7025773  0.6965349  0.6976672  0.6792284  0.6863163  0.6865994
+ [9,] -0.6967963  0.7098581  0.7044419  0.7028724  0.7194678  0.6938818
+[10,] -0.6919867  0.6918030  0.7099354  0.6936200  0.7054818  0.6859157
+            [,7]       [,8]       [,9]      [,10]
+ [1,] -0.6993295 -0.7025773 -0.6967963 -0.6919867
+ [2,]  0.6957391  0.6965349  0.7098581  0.6918030
+ [3,]  0.7131445  0.6976672  0.7044419  0.7099354
+ [4,]  0.6982056  0.6792284  0.7028724  0.6936200
+ [5,]  0.7100969  0.6863163  0.7194678  0.7054818
+ [6,]  0.7057981  0.6865994  0.6938818  0.6859157
+ [7,]  1.0000000  0.7011361  0.7122214  0.6923561
+ [8,]  0.7011361  1.0000000  0.6859206  0.6960906
+ [9,]  0.7122214  0.6859206  1.0000000  0.6974956
+[10,]  0.6923561  0.6960906  0.6974956  1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb99"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb99-1"><a href="#cb99-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(conf_cont1), <span class="fu">aes</span>(<span class="at">x=</span>X1, <span class="at">y=</span>X2))<span class="sc">+</span></span>
+<span id="cb99-2"><a href="#cb99-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>()<span class="sc">+</span></span>
+<span id="cb99-3"><a href="#cb99-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_classic</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="correlation_exploration_files/figure-html/unnamed-chunk-10-1.png" class="img-fluid" width="672"></p>
+</div>
+<div class="sourceCode cell-code" id="cb100"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb100-1"><a href="#cb100-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(synth_cont1), <span class="fu">aes</span>(<span class="at">x =</span> X1, <span class="at">y =</span> X2))<span class="sc">+</span></span>
+<span id="cb100-2"><a href="#cb100-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>()<span class="sc">+</span></span>
+<span id="cb100-3"><a href="#cb100-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_classic</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="correlation_exploration_files/figure-html/unnamed-chunk-10-2.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+</section>
+<section id="not-complete-yet" class="level2">
+<h2 class="anchored" data-anchor-id="not-complete-yet">Not complete yet</h2>
+<ol start="5" type="a">
+<li>A relationship between one variable and many other variables reverses and/or becomes more random at specific values of the variable. The categorical confidential data will generally match the synthetic data less for a specific category in a certain categorical variable, while the continuous confidential data will generally match the synthetic data less as one of the continuous variables gets smaller. This pairing tests which models might be able to be used to identify when a specific subgroup of the population has synthetic data of lower utility than the rest of the population.</li>
+</ol>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb101"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb101-1"><a href="#cb101-1" aria-hidden="true" tabindex="-1"></a>vcov <span class="ot">=</span> <span class="fu">matrix</span>(corr, p, p) <span class="sc">+</span> <span class="fu">diag</span>(<span class="dv">1</span><span class="sc">-</span>corr, p, p) <span class="co"># vcov matrix, p on all off-diagonal variables</span></span>
+<span id="cb101-2"><a href="#cb101-2" aria-hidden="true" tabindex="-1"></a>means <span class="ot">=</span> <span class="fu">rep</span>(<span class="dv">0</span>,p) <span class="co"># mean vector</span></span>
+<span id="cb101-3"><a href="#cb101-3" aria-hidden="true" tabindex="-1"></a>conf_cont1 <span class="ot">=</span> <span class="fu">mvrnorm</span>(means, vcov, <span class="at">n =</span> n)</span>
+<span id="cb101-4"><a href="#cb101-4" aria-hidden="true" tabindex="-1"></a>vcov[<span class="dv">1</span>,<span class="dv">2</span><span class="sc">:</span>p] <span class="ot">=</span> <span class="sc">-</span><span class="fu">rep</span>(corr, p<span class="dv">-1</span>)</span>
+<span id="cb101-5"><a href="#cb101-5" aria-hidden="true" tabindex="-1"></a>vcov[<span class="dv">2</span><span class="sc">:</span>p,<span class="dv">1</span>] <span class="ot">=</span> <span class="sc">-</span><span class="fu">rep</span>(corr, p<span class="dv">-1</span>)</span>
+<span id="cb101-6"><a href="#cb101-6" aria-hidden="true" tabindex="-1"></a>synth_cont1 <span class="ot">=</span> <span class="fu">mvrnorm</span>(means, vcov, <span class="at">n =</span> n)</span>
+<span id="cb101-7"><a href="#cb101-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb101-8"><a href="#cb101-8" aria-hidden="true" tabindex="-1"></a>conf_cat1 <span class="ot">=</span> <span class="fu">generate_cat</span>(conf_cont1)</span>
+<span id="cb101-9"><a href="#cb101-9" aria-hidden="true" tabindex="-1"></a>synth_cat1 <span class="ot">=</span> <span class="fu">generate_cat</span>(synth_cont1)</span>
+<span id="cb101-10"><a href="#cb101-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb101-11"><a href="#cb101-11" aria-hidden="true" tabindex="-1"></a><span class="co"># comparing the variances</span></span>
+<span id="cb101-12"><a href="#cb101-12" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(conf_cont1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.6966847 0.7023148 0.6988808 0.6947160 0.6959035 0.6990652
+ [2,] 0.6966847 1.0000000 0.7050427 0.6990542 0.6978665 0.6984361 0.7059806
+ [3,] 0.7023148 0.7050427 1.0000000 0.6994627 0.6961836 0.6947945 0.7007714
+ [4,] 0.6988808 0.6990542 0.6994627 1.0000000 0.6949182 0.6958101 0.6962125
+ [5,] 0.6947160 0.6978665 0.6961836 0.6949182 1.0000000 0.6928883 0.6977306
+ [6,] 0.6959035 0.6984361 0.6947945 0.6958101 0.6928883 1.0000000 0.7032430
+ [7,] 0.6990652 0.7059806 0.7007714 0.6962125 0.6977306 0.7032430 1.0000000
+ [8,] 0.6997971 0.7029446 0.7003608 0.6998800 0.6935139 0.6993923 0.7033053
+ [9,] 0.7011489 0.7040189 0.7017087 0.7062069 0.7016576 0.7029820 0.6981636
+[10,] 0.7063095 0.7042026 0.7014753 0.6976637 0.7010163 0.6953929 0.7053592
+           [,8]      [,9]     [,10]
+ [1,] 0.6997971 0.7011489 0.7063095
+ [2,] 0.7029446 0.7040189 0.7042026
+ [3,] 0.7003608 0.7017087 0.7014753
+ [4,] 0.6998800 0.7062069 0.6976637
+ [5,] 0.6935139 0.7016576 0.7010163
+ [6,] 0.6993923 0.7029820 0.6953929
+ [7,] 0.7033053 0.6981636 0.7053592
+ [8,] 1.0000000 0.7013470 0.7035509
+ [9,] 0.7013470 1.0000000 0.7026333
+[10,] 0.7035509 0.7026333 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb103"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb103-1"><a href="#cb103-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cor</span>(synth_cont1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>            [,1]       [,2]       [,3]       [,4]       [,5]       [,6]
+ [1,]  1.0000000 -0.7078541 -0.7057918 -0.7055524 -0.7013226 -0.7050083
+ [2,] -0.7078541  1.0000000  0.7083189  0.6984623  0.6983463  0.7097526
+ [3,] -0.7057918  0.7083189  1.0000000  0.7002810  0.7017850  0.7085382
+ [4,] -0.7055524  0.6984623  0.7002810  1.0000000  0.6952558  0.7136133
+ [5,] -0.7013226  0.6983463  0.7017850  0.6952558  1.0000000  0.7063348
+ [6,] -0.7050083  0.7097526  0.7085382  0.7136133  0.7063348  1.0000000
+ [7,] -0.6987183  0.7029355  0.7046244  0.7021614  0.6930016  0.7065883
+ [8,] -0.6987980  0.7068372  0.6986392  0.6979945  0.6961992  0.7027506
+ [9,] -0.7022576  0.7061846  0.7094717  0.7026516  0.7024104  0.7057371
+[10,] -0.7043000  0.7055038  0.7033730  0.7022895  0.6970386  0.7110418
+            [,7]       [,8]       [,9]      [,10]
+ [1,] -0.6987183 -0.6987980 -0.7022576 -0.7043000
+ [2,]  0.7029355  0.7068372  0.7061846  0.7055038
+ [3,]  0.7046244  0.6986392  0.7094717  0.7033730
+ [4,]  0.7021614  0.6979945  0.7026516  0.7022895
+ [5,]  0.6930016  0.6961992  0.7024104  0.6970386
+ [6,]  0.7065883  0.7027506  0.7057371  0.7110418
+ [7,]  1.0000000  0.6953441  0.7031518  0.7004697
+ [8,]  0.6953441  1.0000000  0.6989430  0.7005181
+ [9,]  0.7031518  0.6989430  1.0000000  0.7064776
+[10,]  0.7004697  0.7005181  0.7064776  1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb105"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb105-1"><a href="#cb105-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(conf_cat1)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+ [1,] 1.0000000 0.6995961 0.7058106 0.7117782 0.7006548 0.7045180 0.6932577
+ [2,] 0.6995961 1.0000000 0.7085660 0.7046782 0.7113862 0.7101296 0.7042358
+ [3,] 0.7058106 0.7085660 1.0000000 0.6937914 0.6824818 0.7050081 0.6898680
+ [4,] 0.7117782 0.7046782 0.6937914 1.0000000 0.7022203 0.7011020 0.7038604
+ [5,] 0.7006548 0.7113862 0.6824818 0.7022203 1.0000000 0.6971098 0.7082784
+ [6,] 0.7045180 0.7101296 0.7050081 0.7011020 0.6971098 1.0000000 0.7100145
+ [7,] 0.6932577 0.7042358 0.6898680 0.7038604 0.7082784 0.7100145 1.0000000
+ [8,] 0.7087273 0.7152102 0.7128008 0.7097797 0.7071631 0.7077025 0.7017465
+ [9,] 0.7002347 0.7081657 0.7044240 0.7044397 0.7013466 0.7005822 0.7003623
+[10,] 0.7077997 0.7139559 0.6928342 0.7066638 0.6936751 0.7033141 0.6967059
+           [,8]      [,9]     [,10]
+ [1,] 0.7087273 0.7002347 0.7077997
+ [2,] 0.7152102 0.7081657 0.7139559
+ [3,] 0.7128008 0.7044240 0.6928342
+ [4,] 0.7097797 0.7044397 0.7066638
+ [5,] 0.7071631 0.7013466 0.6936751
+ [6,] 0.7077025 0.7005822 0.7033141
+ [7,] 0.7017465 0.7003623 0.6967059
+ [8,] 1.0000000 0.7066144 0.6995037
+ [9,] 0.7066144 1.0000000 0.7084262
+[10,] 0.6995037 0.7084262 1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb107"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb107-1"><a href="#cb107-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tetrachoric2</span>(synth_cat1)<span class="sc">$</span>rho</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>            [,1]       [,2]       [,3]       [,4]       [,5]       [,6]
+ [1,]  1.0000000 -0.7057344 -0.7097190 -0.7084220 -0.6874514 -0.7007176
+ [2,] -0.7057344  1.0000000  0.7035310  0.6904836  0.6852297  0.7113931
+ [3,] -0.7097190  0.7035310  1.0000000  0.6995206  0.6983632  0.7136169
+ [4,] -0.7084220  0.6904836  0.6995206  1.0000000  0.6939230  0.7305278
+ [5,] -0.6874514  0.6852297  0.6983632  0.6939230  1.0000000  0.7015192
+ [6,] -0.7007176  0.7113931  0.7136169  0.7305278  0.7015192  1.0000000
+ [7,] -0.7006714  0.6943748  0.7006890  0.6993201  0.6796271  0.7035738
+ [8,] -0.6970393  0.7144153  0.6925411  0.7028868  0.6973387  0.7053720
+ [9,] -0.7123555  0.7185554  0.7141509  0.7071314  0.6860581  0.7233020
+[10,] -0.6989997  0.7066530  0.6999320  0.7049087  0.6842226  0.7172046
+            [,7]       [,8]       [,9]      [,10]
+ [1,] -0.7006714 -0.6970393 -0.7123555 -0.6989997
+ [2,]  0.6943748  0.7144153  0.7185554  0.7066530
+ [3,]  0.7006890  0.6925411  0.7141509  0.6999320
+ [4,]  0.6993201  0.7028868  0.7071314  0.7049087
+ [5,]  0.6796271  0.6973387  0.6860581  0.6842226
+ [6,]  0.7035738  0.7053720  0.7233020  0.7172046
+ [7,]  1.0000000  0.6954882  0.6966903  0.6839639
+ [8,]  0.6954882  1.0000000  0.6993371  0.6943824
+ [9,]  0.6966903  0.6993371  1.0000000  0.7016807
+[10,]  0.6839639  0.6943824  0.7016807  1.0000000</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb109"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb109-1"><a href="#cb109-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(conf_cont1), <span class="fu">aes</span>(<span class="at">x=</span>X1, <span class="at">y=</span>X2))<span class="sc">+</span></span>
+<span id="cb109-2"><a href="#cb109-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>()<span class="sc">+</span></span>
+<span id="cb109-3"><a href="#cb109-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_classic</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="correlation_exploration_files/figure-html/unnamed-chunk-11-1.png" class="img-fluid" width="672"></p>
+</div>
+<div class="sourceCode cell-code" id="cb110"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb110-1"><a href="#cb110-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">data.frame</span>(synth_cont1), <span class="fu">aes</span>(<span class="at">x =</span> X1, <span class="at">y =</span> X2))<span class="sc">+</span></span>
+<span id="cb110-2"><a href="#cb110-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>()<span class="sc">+</span></span>
+<span id="cb110-3"><a href="#cb110-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_classic</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="correlation_exploration_files/figure-html/unnamed-chunk-11-2.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    text: function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+  function tippyHover(el, contentFn) {
+    const config = {
+      allowHTML: true,
+      content: contentFn,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start'
+    };
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      return note.innerHTML;
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+</body></html>

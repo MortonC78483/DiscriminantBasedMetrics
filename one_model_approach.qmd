@@ -1,0 +1,177 @@
+---
+title: "one_model_approach"
+format:
+  html:
+    theme: default
+---
+
+This quarto document will go through the aspects of the one-model approach that involve fitting discriminant-based metrics by group( (using new functions) and comparing them to null discriminant-based metrics. The null distribution metrics will be calculated by permuting the group indicator (within synth/conf) and rerunning the one model approach, so we have same proportions of each group in synth/conf but we don't have any associations of the group membership and the quality of the synthetic data, since we permuted the group membership. 
+
+
+```{r}
+
+```
+
+Then, the document will go through the ROC curve part of the one-model approach, which is inspired by (https://arxiv.org/abs/1610.02413). I'm first doing this for the "bad" synthesis.
+
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all("../syntheval")
+library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+library(pROC)
+library(ggplot2)
+
+set.seed(1)
+source("synth_basic.R")
+```
+
+Create good/bad synthesis
+```{r}
+# load data
+data_mi <- read_csv("data/data_mi.csv")
+data_mi <- as.data.frame(unclass(data_mi),stringsAsFactors=TRUE)
+data_mi$pov <- as.factor(data_mi$pov)
+data_mi$BLACK <- as.factor(data_mi$BLACK)
+
+# synthesize (poverty, from majority group only)
+conf_data = data_mi %>%
+  filter(pov == 0)
+start_data = data.frame("pov" = as.factor(rep(0, nrow(data_mi))))
+synth_pov_maj <- synth(start_data, conf_data, c("SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "BLACK", "FTOTINC", "AGE"))
+
+# apply permutation to dataset (need to add people in poverty back in)
+synth_pov_maj <- synth_pov_maj$synthetic_data
+synth_pov_maj$pov <- permute(data_mi$pov)
+
+# synthesize (poverty, from all input data)
+conf_data = data_mi
+start_data = data.frame("pov" = data_mi[,"pov"])
+synth_pov_all <- synth(start_data, conf_data, c("SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "BLACK", "FTOTINC", "AGE"))
+```
+
+Run a discriminator model on bad synthesis
+```{r}
+calc_disc <- function(discriminator){
+  # Evaluate discriminant-based metrics on the data using tree-based model
+  tree_mod <- decision_tree(cost_complexity = tune()) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "rpart")
+  
+  rpart_rec <- recipe(.source_label ~ ., data = discriminator$combined_data)
+  
+  grid = grid_regular(cost_complexity(), levels= 10)
+  
+  # set up discriminator
+  d <- discriminator %>%
+    add_propensities_tuned(
+      grid = grid, 
+      recipe = rpart_rec,
+      spec = tree_mod
+    )
+  d
+}
+```
+
+Make the model
+```{r}
+disc_all = discrimination(synth_pov_all, data_mi)
+res_all = calc_disc(disc_all)
+
+disc_maj = discrimination(synth_pov_maj, data_mi)
+res_maj = calc_disc(disc_maj)
+```
+
+Plot ROC Curves by group, where we're measuring TP and FP within groups.
+```{r}
+# plot as one group
+props = res_maj$propensities$.pred_synthetic
+labels = ifelse(res_maj$propensities$.source_label == "synthetic", 1, 0)
+rocobj <- pROC::roc(response = labels, predictor = props)
+df_rocobj = data.frame(sens = rocobj$sensitivities, spec=  rocobj$specificities, type = "all")
+
+# ggplot(df_rocobj, aes(x = 1-spec, y = sens)) + 
+#   geom_line()
+
+# separate out by group
+props_pov = res_maj$propensities$.pred_synthetic[res_maj$propensities$pov == 1]
+labels_pov = ifelse(res_maj$propensities$.source_label[res_maj$propensities$pov == 1] == "synthetic", 1, 0)
+rocobj_pov <- pROC::roc(response = labels_pov, predictor = props_pov)
+df_rocobj_pov = data.frame(sens = rocobj_pov$sensitivities, spec=  rocobj_pov$specificities, type = "poverty")
+
+# ggplot(df_rocobj_pov, aes(x = 1-spec, y = sens)) + 
+#   geom_line()
+
+props_nopov = res_maj$propensities$.pred_synthetic[res_maj$propensities$pov == 0]
+labels_nopov = ifelse(res_maj$propensities$.source_label[res_maj$propensities$pov == 0] == "synthetic", 1, 0)
+rocobj_nopov <- pROC::roc(response = labels_nopov, predictor = props_nopov)
+df_rocobj_nopov = data.frame(sens = rocobj_nopov$sensitivities, spec=  rocobj_nopov$specificities, type = "no poverty")
+
+# ggplot(df_rocobj_nopov, aes(x = 1-spec, y = sens)) + 
+#   geom_line()
+
+df_rocobj = rbind(df_rocobj, df_rocobj_nopov, df_rocobj_pov)
+
+ggplot(df_rocobj, aes(x = 1-spec, y = sens, group = type, color = type))+
+  geom_line()+
+  geom_abline(slope = 1, intercept = 0, color = "gray")+
+  ggtitle("Bad Synthesis")
+```
+
+```{r}
+# plot as one group
+props = res_all$propensities$.pred_synthetic
+labels = ifelse(res_all$propensities$.source_label == "synthetic", 1, 0)
+rocobj <- pROC::roc(response = labels, predictor = props)
+df_rocobj = data.frame(sens = rocobj$sensitivities, spec=  rocobj$specificities, type = "all")
+
+# ggplot(df_rocobj, aes(x = 1-spec, y = sens)) + 
+#   geom_line()
+
+# separate out by group
+props_pov = res_all$propensities$.pred_synthetic[res_all$propensities$pov == 1]
+labels_pov = ifelse(res_all$propensities$.source_label[res_all$propensities$pov == 1] == "synthetic", 1, 0)
+rocobj_pov <- pROC::roc(response = labels_pov, predictor = props_pov)
+df_rocobj_pov = data.frame(sens = rocobj_pov$sensitivities, spec=  rocobj_pov$specificities, type = "poverty")
+
+# ggplot(df_rocobj_pov, aes(x = 1-spec, y = sens)) + 
+#   geom_line()
+
+props_nopov = res_all$propensities$.pred_synthetic[res_all$propensities$pov == 0]
+labels_nopov = ifelse(res_all$propensities$.source_label[res_all$propensities$pov == 0] == "synthetic", 1, 0)
+rocobj_nopov <- pROC::roc(response = labels_nopov, predictor = props_nopov)
+df_rocobj_nopov = data.frame(sens = rocobj_nopov$sensitivities, spec=  rocobj_nopov$specificities, type = "no poverty")
+
+# ggplot(df_rocobj_nopov, aes(x = 1-spec, y = sens)) + 
+#   geom_line()
+
+df_rocobj = rbind(df_rocobj, df_rocobj_nopov, df_rocobj_pov)
+
+ggplot(df_rocobj, aes(x = 1-spec, y = sens, group = type, color = type))+
+  geom_line()+
+  geom_abline(slope = 1, intercept = 0, color = "gray")+
+  ggtitle("Good Synthesis")
+```
+
+Potential things to compare here are:
+- Euclidean distance between group-wise optima points, representing how much better you're able to discriminate between models for one group vs another when you choose the best discrimination threshold for each group individually.
+- Area under minority curve/area under majority curve -1
+    - is 0 when equal area
+    - is 1 when minority is 1, majority is .5
+    - is negative when minority is less easy to tell apart than majority 
+
+I think this is only doable in a one model approach, since I don't think it really makes sense to plot these for two different models.
+

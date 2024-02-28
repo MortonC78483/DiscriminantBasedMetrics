@@ -1,0 +1,321 @@
+---
+title: "exploratory_variable_picking2"
+format:
+  html:
+    theme: default
+---
+
+Trying to choose which variables to pick from ipums data for analysis. Goals for the variables are something that has a clear minority/majority split in the data and that . 
+Then, want to do synthetic data analysis to show that either:
+
+[Bad synthesis]
+1) when we compare data synthesized from only the majority group, then permuted, to the original data, we see that the discriminant based metrics do a bad job of discriminating.
+2) when we isolate to the minority group, the metrics do a better job, and they still do a bad job when we isolate to the majority group.
+
+[Permutation]
+1) when we compare permuted VOI data to original data (no synthesis involved), we can't discriminate well between datasets for the large data, but we can discriminate well for isolated minority groups.
+2) when we use different model types and discriminant based metrics, we're not able to discriminate much better between synthetic and confidential datasets when we permute our VOI post-synthesis compared to when we don't permute.
+3) when we isolate to the minority group and compare, we can discriminate well.
+
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all('../syntheval')
+library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+```
+
+```{r}
+data <- read_ipums_micro("data/usa_00004.xml")
+data <- data |>
+  mutate(across(where(is.labelled), ~as_factor(lbl_clean(.x))))
+```
+
+```{r}
+states <- c("Michigan")
+vars <- c("STATEFIP", "PERNUM", "SEX", "AGE", "RACE", 
+           "HCOVANY", "EDUC", "EMPSTAT", "FTOTINC", "POVERTY",
+           "VETSTAT")
+
+```
+
+```{r}
+data_mi <- data %>%
+  select(all_of(vars)) %>%
+  filter(STATEFIP %in% states,
+         PERNUM == 1) 
+# recode factor variables (vetstat, sex, race, healthcare coverage, employment status didn't need recoding)
+data_mi$EDUC <- recode(data_mi$EDUC, 
+               "N/A or no schooling" = "N/A",
+               "Nursery school to grade 4" = "Less than high school",
+               "Grade 5, 6, 7, or 8" = "Less than high school",
+               "Grade 9" = "Some high school",
+               "Grade 10" = "Some high school",
+               "Grade 11" = "Some high school",
+               "Grade 12" = "High school",
+               "1 year of college" = "Some college",
+               "2 years of college" = "Some college",
+               "4 years of college" = "4+ years of college",
+               "5+ years of college" = "4+ years of college")
+
+# recode numeric variables (age, poverty (as % of poverty threshold), and income)
+data_mi$AGE <- as.numeric(as.character(recode(data_mi$AGE, 
+                      "Less than 1 year old"= "0",
+                      "90 (90+ in 1980 and 1990)" = "90")))
+data_mi$FTOTINC <- as.numeric(as.character(recode(data_mi$FTOTINC,
+                                     "No income (1950-2000, ACS/PRCS) " = "0")))
+data_mi$POVERTY <- as.numeric(as.character(recode(data_mi$POVERTY,
+                                     "501 percent or more of poverty threshold" = "500",
+                                     "1 percent or less of poverty threshold (including 0 or negative income)" = "0")))
+
+# set character NAs to be NA
+data_mi[data_mi == "N/A"]<-NA 
+
+# complete case analysis of adults only
+data_mi <- data_mi %>%
+  filter(AGE >= 19,
+         complete.cases(.)) %>%
+  select(-c("STATEFIP", "PERNUM"))
+
+# get rid of unused NA levels in factors (educ, empstat, vetstat)
+data_mi = droplevels(data_mi)
+```
+
+Looking at veteran status
+```{r}
+plot(data_mi$POVERTY, data_mi$FTOTINC)
+data_mi$pov <- ifelse(data_mi$POVERTY < 100, 1, 0)
+#data_mi <- data_mi %>%
+#  filter(RACE %in% c("White", "Black/African American"))
+#data_mi$black <- ifelse(data_mi$RACE == "Black/African American", 1, 0)
+table(data_mi$VETSTAT, data_mi$pov)
+prop.table(table(data_mi$pov, data_mi$HCOVANY), 1)
+prop.table(table(data_mi$pov, data_mi$EMPSTAT), 1)
+prop.table(table(data_mi$pov, data_mi$EDUC), 1)
+prop.table(table(data_mi$pov, data_mi$SEX), 1)
+
+ggplot(data_mi, aes(group = pov, x = log(FTOTINC+1), color = pov))+
+  geom_density()
+
+ggplot(data_mi, aes(group = pov, x = POVERTY, color = pov))+
+  geom_density()
+
+data_mi <- data_mi %>%
+  select(-c(POVERTY))
+```
+
+So now we're at a majority and minority (under and over poverty line, with under poverty line = 11% of dataset)
+```{r}
+sum(data_mi$pov)/nrow(data_mi)
+
+library(caret)
+
+#define one-hot encoding function
+dummy <- dummyVars(" ~ .", data=data_mi)
+
+#perform one-hot encoding on data frame
+final_df <- data.frame(predict(dummy, newdata=data_mi)) %>%
+  select(-c("SEX.Male", "HCOVANY.With.health.insurance.coverage", "EDUC.4..years.of.college", "EMPSTAT.Not.in.labor.force", "VETSTAT.Veteran"))
+
+cor <- round(cor(final_df), 2)
+
+library(corrplot)
+corrplot(cor, type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+
+# Get some colors
+col<- colorRampPalette(c("blue", "white", "red"))(20)
+heatmap(x = cor, col = col, symm = TRUE)
+```
+
+1) when we compare data synthesized from only the majority group, then permuted, to the original data, we see that the discriminant based metrics do a bad job of discriminating.
+```{r}
+# original synthesis
+start_data = data_mi[,"pov"]
+start_data$pov = rep(0, nrow(data_mi))
+conf_data = data_mi %>%
+  filter(pov == 0)
+
+# synthesize categorical first, then continuous
+visit_sequence = visit_sequence(c("SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "RACE", "FTOTINC", "AGE"), start_data, type = "manual")
+roadmap = roadmap(conf_data, start_data, visit_sequence)
+recipe = construct_recipes(roadmap = roadmap)
+
+tree_cl <- parsnip::decision_tree(cost_complexity = .0001) %>%
+  set_mode(mode = "classification") %>%
+  set_engine(engine = "rpart")
+tree_reg <- parsnip::decision_tree(cost_complexity = .0001) %>%
+  set_mode(mode = "regression") %>%
+  set_engine(engine = "rpart")
+
+synth_spec = synth_spec(roadmap,
+                        synth_algorithms = list(tree_cl, tree_cl, tree_cl, tree_cl, tree_cl, tree_cl, tree_reg, tree_reg),
+                        recipe,
+                        predict_methods = sample_rpart)
+
+# noise
+noise <- noise(roadmap = roadmap,
+               add_noise = FALSE,
+               exclusions = 0)
+
+# constraints
+constraints <- constraints(roadmap = roadmap,
+                           constraints = NULL,
+                           max_z = 0)
+
+replicates <- replicates(replicates = 1,
+                         workers = 1,
+                         summary_function = NULL)
+
+# create a presynth object
+presynth1 <- presynth(
+  roadmap = roadmap,
+  synth_spec = synth_spec,
+  noise = noise, 
+  constraints = constraints,
+  replicates = replicates
+)
+```
+
+```{r}
+set.seed(1)
+synthesized = synthesize(presynth1, progress = TRUE)
+```
+
+2) when we isolate to the minority group, the metrics do a better job, and they still do a bad job when we isolate to the majority group.
+```{r}
+disc_tree <- function(discriminator){
+  # Evaluate discriminant-based metrics on the data using tree-based model
+  tree_mod <- decision_tree(cost_complexity = tune()) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "rpart")
+  
+  rpart_rec <- recipe(.source_label ~ ., data = discriminator$combined_data)
+  
+  grid = grid_regular(cost_complexity(), levels= 10)
+  
+  # set up discriminator
+  d <- discriminator %>%
+    add_propensities_tuned(
+      grid = grid, 
+      recipe = rpart_rec,
+      spec = tree_mod
+    ) %>%
+    add_discriminator_auc() %>%
+    add_specks() %>%
+    add_pmse()
+  res = c(d$discriminator_auc, d$pmse, d$specks)
+  return(c(res$.estimate[2], res$.pmse[2], res$.specks[2]))
+}
+
+
+disc_rf <- function(discriminator){
+  # Evaluate discriminant-based metrics on the data using random forest
+  rand_forest_mod <- rand_forest(
+    mode = "classification",
+    engine = "randomForest",
+    mtry = NULL,
+    trees = NULL,
+    min_n = NULL
+  )
+  
+  rpart_rec <- recipe(.source_label ~ ., data = discriminator$combined_data)
+  
+  # set up discriminator
+  d_rf <- discriminator %>%
+    add_propensities(
+      recipe = rpart_rec,
+      spec = rand_forest_mod
+    ) %>%
+    add_discriminator_auc() %>%
+    add_specks() %>%
+    add_pmse()
+  res = c(d_rf$discriminator_auc, d_rf$pmse, d_rf$specks)
+  return(c(res$.estimate[2], res$.pmse[2], res$.specks[2]))
+}
+```
+
+```{r}
+# apply permutation to dataset
+synthesized_data <- synthesized$synthetic_data
+synthesized_data$pov <- permute(data_mi$pov)
+synthesized_data_pov <- synthesized_data %>%
+  filter(pov == 1)
+data_mi_pov <- data_mi %>%
+  filter(pov == 1)
+synthesized_data_nopov <- synthesized_data %>%
+  filter(pov == 0)
+data_mi_nopov <- data_mi %>%
+  filter(pov == 0)
+
+# whole dataset
+d_synthesized = discrimination(synthesized_data, data_mi)
+d_tree = disc_tree(d_synthesized)
+d_rf= disc_rf(d_synthesized)
+whole <- cbind(d_tree, d_rf)
+whole
+
+# isolate to minority group
+d_synthesized_pov = discrimination(synthesized_data_pov, data_mi_pov)
+d_tree = disc_tree(d_synthesized_pov)
+d_rf= disc_rf(d_synthesized_pov)
+pov <- cbind(d_tree, d_rf)
+pov
+
+# isolate to majority group
+d_synthesized_nopov = discrimination(synthesized_data_nopov, data_mi_nopov)
+nopov <- cbind(disc_tree(d_synthesized_nopov),
+           disc_rf(d_synthesized_nopov))
+nopov
+```
+
+Look more deeply at the poverty decision tree to see what the decisions are being based on
+```{r}
+d_synthesized_pov = discrimination(synthesized_data_pov, data_mi_pov)
+
+# Evaluate discriminant-based metrics on the data using tree-based model
+tree_mod <- decision_tree(cost_complexity = tune()) %>%
+  set_mode(mode = "classification") %>%
+  set_engine(engine = "rpart")
+  
+rpart_rec <- recipe(.source_label ~ ., data = d_synthesized_pov$combined_data)
+  
+grid = grid_regular(cost_complexity(), levels= 10)
+  
+# set up discriminator
+d <- d_synthesized_pov %>%
+  add_propensities_tuned(
+    grid = grid, 
+    recipe = rpart_rec,
+    spec = tree_mod
+  ) %>%
+  add_discriminator_auc() %>%
+  add_specks() %>%
+  add_pmse()
+
+#res = c(d$discriminator_auc, d$pmse, d$specks)
+#return(c(res$.estimate[2], res$.pmse[2], res$.specks[2]))
+
+# get variable importance
+library(vip)
+  
+d$discriminator %>%
+  extract_fit_parsnip() %>%
+  vip()
+
+ggplot(data_mi, aes(x = log(FTOTINC+1), group = pov, color = pov))+
+  geom_density()
+```
+
+We can see the most important variable by far if FTOTINC
+
+
+

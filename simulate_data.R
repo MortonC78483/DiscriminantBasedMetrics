@@ -115,30 +115,98 @@ cart_workflow1 <-
   add_model(cart_mod1) %>%
   add_recipe(recipe1)
 cart_fit1 = fit(cart_workflow1, data = combined_1)
-cart_pred1 = as.numeric(predict(cart_fit1, combined_1)$.pred_class)
+cart_pred1 = as.numeric(predict(cart_fit1, combined_1, type = "prob")$.pred_1)
 
-cart_mod2 <- decision_tree(tree_depth = 5) %>% 
+cart_mod2 <- decision_tree(tree_depth = 5, cost_complexity = 0.001) %>% 
   # This model can be used for classification or regression, so set mode
   set_mode("classification") %>% 
   set_engine("rpart")
+
 cart_workflow2 <- 
   workflow() %>%
   add_model(cart_mod2) %>%
   add_recipe(recipe2)
 cart_fit2 = fit(cart_workflow2, data = combined_2)
-cart_pred2 = as.numeric(predict(cart_fit2, combined_2)$.pred_class)
-
-
+cart_pred2 = as.numeric(predict(cart_fit2, combined_2, type = "prob")$.pred_1)
 
 #==========================================================================
 # metrics (pMSE)
-v1_fits = data.frame(cbind("true" = as.numeric(combined_1$confidential)-1, "lr" = lr_vals1, "cart" = cart_pred1-1))
-v2_fits = data.frame(cbind("true" = as.numeric(combined_2$confidential)-1, "lr" = lr_vals2, "cart" = cart_pred2-1))
+v1_fits = data.frame(cbind("true" = as.numeric(combined_1$confidential)-1, "lr" = lr_vals1, "cart" = cart_pred1))
+v2_fits = data.frame(cbind("true" = as.numeric(combined_2$confidential)-1, "lr" = lr_vals2, "cart" = cart_pred2))
 
-mean((v1_fits$true-v1_fits$lr)^2)
-mean((v1_fits$true-v1_fits$cart)^2)
-mean((v2_fits$true-v2_fits$lr)^2)
-mean((v2_fits$true-v2_fits$cart)^2)
+mean((.5-v1_fits$lr)^2)
+mean((.5-v1_fits$cart)^2)
+mean((.5-v2_fits$lr)^2)
+mean((.5-v2_fits$cart)^2)
+
+#==========================================================================
+combined_1 = data.frame(rbind(cbind(conf_cat1, "confidential" = 1),
+                              cbind(synth_cat1, "confidential" = 0)))
+combined_1$confidential = as.factor(combined_1$confidential)
+combined_2 = data.frame(rbind(cbind(conf_cat2, "confidential" = 1),
+                              cbind(synth_cat2, "confidential" = 0)))
+combined_2$confidential = as.factor(combined_2$confidential)
+
+# logistic regression (tidymodels)
+lr_mod1 <- logistic_reg(engine = "glm")
+recipe1 <- recipe(confidential ~ .,
+                  data = combined_1)
+lr_workflow1 <- 
+  workflow() %>%  
+  add_model(lr_mod1) %>% 
+  add_recipe(recipe1)
+
+lr_fit1 = fit(lr_workflow1, data = combined_1)
+lr_vals1 = lr_fit1$fit$fit$fit$fitted.values
+hist(lr_vals1)
+
+lr_mod2 <- logistic_reg(engine = "glm")
+recipe2 <- recipe(confidential ~ ., 
+                  data = combined_2)
+lr_workflow2 <- 
+  workflow() %>%  
+  add_model(lr_mod2) %>% 
+  add_recipe(recipe2)
+
+lr_fit2 = fit(lr_workflow2, data = combined_2)
+lr_vals2 = lr_fit2$fit$fit$fit$fitted.values
+hist(lr_vals2)
+
+# CART(tidymodels)
+# here, I'm seeing that we have to fiddle with cost complexity to balance it
+# out 
+cart_mod1 <- decision_tree(tree_depth = 10, cost_complexity = 0.001) %>% 
+  # This model can be used for classification or regression, so set mode
+  set_mode("classification") %>% 
+  set_engine("rpart")
+cart_workflow1 <- 
+  workflow() %>%
+  add_model(cart_mod1) %>%
+  add_recipe(recipe1)
+cart_fit1 = fit(cart_workflow1, data = combined_1)
+cart_pred1 = as.numeric(predict(cart_fit1, combined_1, type = "prob")$.pred_1)
+
+cart_mod2 <- decision_tree(tree_depth = 5, cost_complexity = 0.001) %>% 
+  # This model can be used for classification or regression, so set mode
+  set_mode("classification") %>% 
+  set_engine("rpart")
+
+cart_workflow2 <- 
+  workflow() %>%
+  add_model(cart_mod2) %>%
+  add_recipe(recipe2)
+cart_fit2 = fit(cart_workflow2, data = combined_2)
+cart_pred2 = as.numeric(predict(cart_fit2, combined_2, type = "prob")$.pred_1)
+
+#==========================================================================
+# metrics (pMSE)
+v1_fits = data.frame(cbind("true" = as.numeric(combined_1$confidential)-1, "lr" = lr_vals1, "cart" = cart_pred1))
+v2_fits = data.frame(cbind("true" = as.numeric(combined_2$confidential)-1, "lr" = lr_vals2, "cart" = cart_pred2))
+
+mean((.5-v1_fits$lr)^2)
+mean((.5-v1_fits$cart)^2)
+mean((.5-v2_fits$lr)^2)
+mean((.5-v2_fits$cart)^2)
 
 #==========================================================================
 # Deprecated

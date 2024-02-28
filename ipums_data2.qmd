@@ -1,0 +1,337 @@
+---
+title: "ipums_data2"
+format:
+  html:
+    theme: default
+---
+
+This script is meant to pull IPUMS data and start basic synthesis with it based on gender.
+It will be synthesizing health related variabels following Aaron's health-insurance.html script.
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all('../syntheval')
+library(syntheval)
+library(dials)
+library(tune)
+```
+
+
+```{r}
+# create a new extract object
+extract_definition <- define_extract_usa(
+  description = "Extract",
+  samples = "us2022a",
+  variables = c("AGE", "SEX", "RACE", "STATEFIP", "EMPSTAT", "HCOVANY",
+                "EDUC", "VETSTAT", "FTOTINC", "POVERTY")
+)
+set_ipums_api_key("59cba10d8a5da536fc06b59d5510a9b000d64836bea03cf84b15b1c4")
+
+# submit the extract to IPUMS USA for processing
+submitted_extract <- submit_extract(extract_definition)
+
+# access the extract number, stored in the return value of submit_extract
+submitted_extract$number
+
+wait_for_extract(submitted_extract)
+
+# This will save the extract files to the current directory
+# use the download_dir argument to specify a different location
+# The return value is the path to the DDI codebook file, which can then be passed to read_ipums_micro to read the data
+path_to_ddi_file <- download_extract(submitted_extract, download_dir = "data")
+```
+
+```{r}
+data <- read_ipums_micro("data/usa_00004.xml")
+data <- data |>
+  mutate(across(where(is.labelled), ~as_factor(lbl_clean(.x))))
+```
+
+
+```{r}
+states <- c("Michigan")
+vars <- c("STATEFIP", "PERNUM", "SEX", "AGE", "RACE", 
+           "HCOVANY", "EDUC", "EMPSTAT", "FTOTINC", "POVERTY",
+           "VETSTAT")
+
+```
+
+```{r}
+data_mi <- data %>%
+  select(all_of(vars)) %>%
+  filter(STATEFIP %in% states,
+         PERNUM == 1) 
+# recode factor variables (vetstat, sex, race, healthcare coverage, employment status didn't need recoding)
+data_mi$EDUC <- recode(data_mi$EDUC, 
+               "N/A or no schooling" = "N/A",
+               "Nursery school to grade 4" = "Less than high school",
+               "Grade 5, 6, 7, or 8" = "Less than high school",
+               "Grade 9" = "Some high school",
+               "Grade 10" = "Some high school",
+               "Grade 11" = "Some high school",
+               "Grade 12" = "High school",
+               "1 year of college" = "Some college",
+               "2 years of college" = "Some college",
+               "4 years of college" = "4+ years of college",
+               "5+ years of college" = "4+ years of college")
+
+# recode numeric variables (age, poverty (as % of poverty threshold), and income)
+data_mi$AGE <- as.numeric(as.character(recode(data_mi$AGE, 
+                      "Less than 1 year old"= "0",
+                      "90 (90+ in 1980 and 1990)" = "90")))
+data_mi$FTOTINC <- as.numeric(as.character(recode(data_mi$FTOTINC,
+                                     "No income (1950-2000, ACS/PRCS) " = "0")))
+data_mi$POVERTY <- as.numeric(as.character(recode(data_mi$POVERTY,
+                                     "501 percent or more of poverty threshold" = "500",
+                                     "1 percent or less of poverty threshold (including 0 or negative income)" = "0")))
+
+# set character NAs to be NA
+data_mi[data_mi == "N/A"]<-NA 
+
+# complete case analysis of adults only
+data_mi <- data_mi %>%
+  filter(AGE >= 19,
+         complete.cases(.)) %>%
+  select(-c("STATEFIP", "PERNUM"))
+
+# get rid of unused NA levels in factors (educ, empstat, vetstat)
+data_mi = droplevels(data_mi)
+```
+
+```{r}
+table(data_mi$SEX, data_mi$RACE)
+prop.table(table(data_mi$SEX, data_mi$HCOVANY), 1)
+prop.table(table(data_mi$SEX, data_mi$EMPSTAT), 1)
+prop.table(table(data_mi$SEX, data_mi$EDUC), 1)
+prop.table(table(data_mi$SEX, data_mi$VETSTAT), 1)
+
+ggplot(data_mi, aes(group = SEX, x = log(FTOTINC), color = SEX))+
+  geom_density()
+
+ggplot(data_mi, aes(group = SEX, x = POVERTY, color = SEX))+
+  geom_density()
+
+data_mi <- data_mi %>%
+  select(-c(RACE))
+```
+
+Sex is column 0 1, so we observe that males (0) are less likely than females to have health insurance coverage and more likely than females to be employed. 
+
+We now try to synthesize this data using tidysynthesis, first doing synthesis fairly well, and then messing up the input data to purposely do a poor job for women.
+```{r}
+# start with the input data
+start_data = data_mi[,1]
+conf_data = data_mi
+# synthesize categorical first, then continuous
+visit_sequence = visit_sequence(c("VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "POVERTY", "FTOTINC", "AGE"), start_data, type = "manual")
+roadmap = roadmap(conf_data, start_data, visit_sequence)
+recipe = construct_recipes(roadmap = roadmap)
+# cl_mod <- parsnip::logistic_reg() %>% 
+#   parsnip::set_engine(engine = "glm") %>%
+#   parsnip::set_mode(mode = "classification")
+# lm_mod <- parsnip::linear_reg() %>% 
+#   parsnip::set_engine(engine = "lm") %>%
+#   parsnip::set_mode(mode = "regression")
+tree_cl <- parsnip::decision_tree(cost_complexity = .0001) %>%
+  set_mode(mode = "classification") %>%
+  set_engine(engine = "rpart")
+tree_reg <- parsnip::decision_tree(cost_complexity = .0001) %>%
+  set_mode(mode = "regression") %>%
+  set_engine(engine = "rpart")
+
+synth_spec = synth_spec(roadmap,
+                        synth_algorithms = list(tree_cl, tree_cl, tree_cl, tree_cl, tree_reg, tree_reg, tree_reg),
+                        recipe,
+                        predict_methods = sample_rpart)
+
+# noise
+noise <- noise(roadmap = roadmap,
+               add_noise = FALSE,
+               exclusions = 0)
+
+# constraints
+constraints <- constraints(roadmap = roadmap,
+                           constraints = NULL,
+                           max_z = 0)
+
+replicates <- replicates(replicates = 1,
+                         workers = 1,
+                         summary_function = NULL)
+
+# create a presynth object
+presynth1 <- presynth(
+  roadmap = roadmap,
+  synth_spec = synth_spec,
+  noise = noise, 
+  constraints = constraints,
+  replicates = replicates
+)
+```
+
+```{r}
+# synth
+set.seed(1)
+synthesized = synthesize(presynth1, progress = TRUE)
+```
+
+```{r}
+# start with the input data
+library(gtools)
+# start with the input data
+set.seed(1)
+start_data = data.frame(SEX = permute(data_mi$SEX))
+conf_data = cbind(start_data, data_mi[,-1])
+
+visit_sequence = visit_sequence(c("VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "POVERTY", "FTOTINC", "AGE"), start_data, type = "manual")
+roadmap = roadmap(conf_data, start_data, visit_sequence)
+recipe = construct_recipes(roadmap = roadmap)
+# cl_mod <- parsnip::logistic_reg() %>% 
+#   parsnip::set_engine(engine = "glm") %>%
+#   parsnip::set_mode(mode = "classification")
+# lm_mod <- parsnip::linear_reg() %>% 
+#   parsnip::set_engine(engine = "lm") %>%
+#   parsnip::set_mode(mode = "regression")
+tree_cl <- parsnip::decision_tree(cost_complexity = .0001) %>%
+  set_mode(mode = "classification") %>%
+  set_engine(engine = "rpart")
+tree_reg <- parsnip::decision_tree(cost_complexity = .0001) %>%
+  set_mode(mode = "regression") %>%
+  set_engine(engine = "rpart")
+
+synth_spec = synth_spec(roadmap,
+                        synth_algorithms = list(tree_cl, tree_cl, tree_cl, tree_cl, tree_reg, tree_reg, tree_reg),
+                        recipe,
+                        predict_methods = sample_rpart)
+
+# noise
+noise <- noise(roadmap = roadmap,
+               add_noise = FALSE,
+               exclusions = 0)
+
+# constraints
+constraints <- constraints(roadmap = roadmap,
+                           constraints = NULL,
+                           max_z = 0)
+
+replicates <- replicates(replicates = 1,
+                         workers = 1,
+                         summary_function = NULL)
+
+# create a presynth object
+presynth1 <- presynth(
+  roadmap = roadmap,
+  synth_spec = synth_spec,
+  noise = noise, 
+  constraints = constraints,
+  replicates = replicates
+)
+
+# synth
+set.seed(1)
+synthesized_permuted = synthesize(presynth1, progress = TRUE)
+```
+
+```{r}
+synthetic_data = synthesized$synthetic_data
+synthetic_data_permuted = synthesized_permuted$synthetic_data
+data_permuted = conf_data
+```
+
+```{r}
+# Evaluate discriminant-based metrics on the data using tree-based model
+
+tree_mod <- decision_tree(cost_complexity = tune()) %>%
+  set_mode(mode = "classification") %>%
+  set_engine(engine = "rpart")
+
+rpart_rec <- recipe(.source_label ~ ., data = discrimination(synthetic_data, data_mi)$combined_data)
+
+grid = grid_regular(cost_complexity(), levels= 10)
+# set up discriminator
+d <- discrimination(synthetic_data, data_mi) %>%
+  add_propensities_tuned(
+    grid = grid, 
+    recipe = rpart_rec,
+    spec = tree_mod
+  ) %>%
+  add_discriminator_auc() %>%
+  add_specks() %>%
+  add_pmse()
+d$discriminator_auc
+d$pmse
+d$specks
+```
+
+.88 discriminator AUC, .12 pMSE, .65 SPECKS for data created from true underlying data.
+
+```{r}
+# Evaluate discriminant-based metrics on the data using tree-based model
+tree_mod <- decision_tree(cost_complexity = tune()) %>%
+  set_mode(mode = "classification") %>%
+  set_engine(engine = "rpart")
+
+cat_vars = c("SEX", "HCOVANY", "EDUC", "EMPSTAT", "VETSTAT")
+cat_data_mi = data_mi[,c("SEX")]
+cat_synthetic_data_permuted = synthetic_data_permuted[,c("SEX")]
+
+rpart_rec <- recipe(.source_label ~ ., data = discrimination(synthetic_data_permuted, data_mi)$combined_data)
+
+grid = grid_regular(cost_complexity(), levels= 10)
+
+
+# set up discriminator
+d <- discrimination(synthetic_data_permuted, data_mi) %>%
+  add_propensities_tuned(
+    grid = grid, 
+    recipe = rpart_rec,
+    spec = tree_mod
+  ) %>%
+  add_discriminator_auc() %>%
+  add_specks() %>%
+  add_pmse()
+d$discriminator_auc
+d$pmse
+d$specks
+```
+
+
+AUC = .88
+pMSE = .12
+SPECKS = .64
+
+Says that current metrics (with this model) think that our bad synthetic data (created based on permuted gender) do a good job matching the original data -- need to double check everything though/would like to go over in meeting!
+
+```{r}
+synthetic_data_permuted
+prop.table(table(synthetic_data_permuted$SEX, synthetic_data_permuted$HCOVANY), 1)
+prop.table(table(synthetic_data_permuted$SEX, synthetic_data_permuted$EMPSTAT), 1)
+prop.table(table(synthetic_data_permuted$SEX, synthetic_data_permuted$EDUC), 1)
+prop.table(table(synthetic_data_permuted$SEX, synthetic_data_permuted$VETSTAT), 1)
+
+ggplot(synthetic_data_permuted, aes(group = SEX, x = log(FTOTINC), color = SEX))+
+  geom_density()
+
+ggplot(synthetic_data_permuted, aes(group = SEX, x = POVERTY, color = SEX))+
+  geom_density()
+```
+
+```{r}
+library(rpart)
+install.packages("rpart.plot")
+library(rpart.plot)
+d$discriminator$fit$fit$fit
+rpart.plot(d$discriminator$fit$fit$fit)
+library(vip)
+d$discriminator %>%
+  extract_fit_parsnip() %>%
+  vip()
+```
+
+
+

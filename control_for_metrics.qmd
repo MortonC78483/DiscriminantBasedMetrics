@@ -1,0 +1,171 @@
+---
+title: "control_for_metrics"
+format:
+  html:
+    theme: default
+---
+
+I've developed 2 ways to look at discriminant-based metrics isolated out by group. 
+
+The first one is to do a single model approach, where one model is used to get propensity scores for the whole combined synth+conf dataset, and then those propensity scores are each used to calculate discriminant-based metrics. 
+
+The second one is to do a two model approach, where one model is trained on the majority group in synth+conf dataset, and second model is trained on the minority group. Then the two separate models make their own propensity scores, which I calculate discriminant-based metrics from.
+
+I've observed the single model approach is less sensitive than the two model approach, and I'm wondering whether the approaches will give any signal of majority/minority bias on a null distribution. This is a way for me to test if they're claiming there's model bias on a control -- particularly important for the two model approach. If the two model approach is claiming there's bias on a control, then I probably can't advocate for using it, unless I can control for it (through something like a ratio with this document's numbers in the denominator for my methods).
+
+The way I'm getting this null distribution is similar to the pMSE ratio's null distribution calculations. For this, you use the synthetic data in the numerator, calculating the true two model or single model metrics. Then, in the denominator, you bootstrap a dataset from the confidential data that is 2x the conf data randomly assign half synth and half conf labels. Calculate metrics. If you do this 100x, you're going to isolate out modeling error without sampling error. Then put these in the denominator.
+
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all('../syntheval')
+library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+
+set.seed(1)
+```
+
+```{r}
+# load data
+data_mi <- read_csv("data/data_mi.csv")
+data_mi <- as.data.frame(unclass(data_mi),stringsAsFactors=TRUE)
+data_mi$pov <- as.factor(data_mi$pov)
+data_mi$BLACK <- as.factor(data_mi$BLACK)
+```
+
+```{r}
+# function that takes start data and confidential data, and synthesizes dataset
+synth <- function(start_data, conf_data, var_order){
+  # synthesize categorical first, then continuous
+  visit_sequence = visit_sequence(var_order, start_data, type = "manual")
+  roadmap = roadmap(conf_data, start_data, visit_sequence)
+  recipe = construct_recipes(roadmap = roadmap)
+  
+  tree_cl <- parsnip::decision_tree(cost_complexity = .0001) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "rpart")
+  tree_reg <- parsnip::decision_tree(cost_complexity = .0001) %>%
+    set_mode(mode = "regression") %>%
+    set_engine(engine = "rpart")
+  
+  synth_algorithms = list()
+  for (i in 1:length(var_order)){
+    if(class(conf_data[,var_order[i]]) == "factor"){
+      synth_algorithms[[i]] = tree_cl
+    } else{
+      synth_algorithms[[i]] = tree_reg
+    }
+  }
+
+    synth_spec = synth_spec(roadmap,
+                          synth_algorithms = synth_algorithms,
+                          recipe,
+                          predict_methods = sample_rpart)
+  
+  # noise
+  noise <- noise(roadmap = roadmap,
+                 add_noise = FALSE,
+                 exclusions = 0)
+  
+  # constraints
+  constraints <- constraints(roadmap = roadmap,
+                             constraints = NULL,
+                             max_z = 0)
+  
+  replicates <- replicates(replicates = 1,
+                           workers = 1,
+                           summary_function = NULL)
+  
+  # create a presynth object
+  presynth1 <- presynth(
+    roadmap = roadmap,
+    synth_spec = synth_spec,
+    noise = noise, 
+    constraints = constraints,
+    replicates = replicates
+  )
+  synthesized = synthesize(presynth1, progress = TRUE)
+  synthesized
+}
+calc_disc <- function(discriminator){
+  # Evaluate discriminant-based metrics on the data using tree-based model
+  tree_mod <- decision_tree(cost_complexity = tune()) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "rpart")
+  
+  rpart_rec <- recipe(.source_label ~ ., data = discriminator$combined_data)
+  
+  grid = grid_regular(cost_complexity(), levels= 10)
+  
+  # set up discriminator
+  d <- discriminator %>%
+    add_propensities_tuned(
+      grid = grid, 
+      recipe = rpart_rec,
+      spec = tree_mod
+    )
+  d
+}
+```
+
+```{r}
+conf_data = data_mi
+start_data = data.frame("pov" = data_mi[,"pov"])
+synth_pov_all <- synth(start_data, conf_data, c("SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "BLACK", "FTOTINC", "AGE"))
+```
+
+```{r}
+# resample from conf data, dataset 2x size
+sample <- conf_data[sample(1:nrow(conf_data), 2*nrow(conf_data), replace=TRUE),]
+
+# label dataset with synth/conf label
+source <- permute(c(rep("synth", nrow(conf_data)), rep("conf", nrow(conf_data))))
+```
+
+```{r}
+# calculate two model approach metrics
+# Divide into four datasets -- synth min, synth maj, conf min, conf maj
+conf_min = sample[sample$pov==1 & source == "conf",]
+synth_min = sample[sample$pov==1 & source == "synth",]
+conf_maj = sample[sample$pov==0 & source == "conf",]
+synth_maj = sample[sample$pov==0 & source == "synth",]
+
+# run disc-based metrics
+d_min <- discrimination(synth_min, conf_min)
+d_tree_min <- calc_disc(d_min)
+d_tree_min <- d_tree_min %>%
+  add_discriminator_auc()
+min_auc_pov_all = d_tree_min$discriminator_auc$.estimate[2]
+  
+# isolate to majority group
+d_maj <- discrimination(synth_maj, conf_maj)
+d_tree_maj <- calc_disc(d_maj)
+d_tree_maj <- d_tree_maj %>%
+  add_discriminator_auc()
+maj_auc_pov_all = d_tree_maj$discriminator_auc$.estimate[2]
+c(min_auc_pov_all, maj_auc_pov_all)
+
+```
+
+```{r}
+conf = sample[source == "conf",]
+synth = sample[source == "synth",]
+# Calculate single model approach metrics
+disc_all = discrimination(synth, conf)
+res_all = calc_disc(disc_all)
+auc_all <- res_all %>%
+  add_discriminator_auc()
+auc_pov_all = auc_all$discriminator_auc$.estimate[2]
+```

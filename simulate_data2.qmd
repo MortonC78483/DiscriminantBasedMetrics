@@ -1,0 +1,400 @@
+---
+title: "simulate_data2"
+format:
+  html:
+    theme: default
+    embed-resources: true
+    toc: true
+
+---
+
+In this document, I'll go through making a tree-based model and logistic regression model for datasets where we have no difference between the synthetic and confidential data, and a series of datasets where there are differences. I'll compare different discriminant-based metrics on these models. 
+Finally, I'll try to put the findings into a figure. This is using Aaron's new functions in the syntheval package.
+
+```{r packaes}
+library(tidyverse)
+library(devtools)
+load_all('../syntheval')
+library(syntheval)
+library(tidymodels)
+library(vip)
+library(tidysynthesis)
+library(MASS)
+library(dplyr)
+library(ggpubr)
+```
+
+
+```{r}
+set.seed(101)
+n=10000 # number of samples
+corr=.7 # correlation
+p = 10 # number of variables
+
+generate_cat <- function(cont){
+  as_tibble(cont>0, n = 10)*1
+}
+
+generate_postsynth <- function(data){
+  list(
+    synthetic_data = data,
+    jth_synthesis_time = data.frame(
+      variable = factor(colnames(data.frame(data)))
+    )
+  )  %>%
+  structure(class = "postsynth")
+}
+```
+
+All variations on the input data
+```{r}
+# Same distribution
+vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+means = rep(0,p) # mean vector
+conf_cont1 = as_tibble(mvrnorm(means, vcov, n = n), n = p)
+synth_cont1 = generate_postsynth(as_tibble(mvrnorm(means, vcov, n = n), n=p))
+
+conf_cat1 = generate_cat(conf_cont1)
+synth_cat1 = generate_postsynth(generate_cat(synth_cont1[[1]]))
+
+# larger variances, slightly off means
+vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+means = rep(0,p) # mean vector
+conf_cont2 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+means = sample(c(-.2,.2), 10, replace = T) # mean vector
+vcov = matrix(2*corr, p, p) + diag(4-2*corr, p, p) # vcov matrix, p on all off-diagonal variables
+synth_cont2 = generate_postsynth(as_tibble(mvrnorm(means, vcov, n = n), n=p))
+
+conf_cat2 = generate_cat(conf_cont2)
+synth_cat2 = generate_postsynth(generate_cat(synth_cont2[[1]]))
+
+# one variable centered at wrong value
+vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+means = rep(0,p) # mean vector
+conf_cont3 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+means[1] = 2
+synth_cont3 = generate_postsynth(as_tibble(mvrnorm(means, vcov, n = n), n=p))
+
+conf_cat3 = generate_cat(conf_cont3)
+synth_cat3 = generate_postsynth(generate_cat(synth_cont3[[1]]))
+
+# relationship reversed (between V1 and everything else)
+vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+means = rep(0,p) # mean vector
+conf_cont4 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+vcov[1,2:p] = -rep(corr, p-1)
+vcov[2:p,1] = -rep(corr, p-1)
+synth_cont4 = generate_postsynth(as_tibble(mvrnorm(means, vcov, n = n), n=p))
+
+conf_cat4 = generate_cat(conf_cont4)
+synth_cat4 = generate_postsynth(generate_cat(synth_cont4[[1]]))
+
+# continuous case where one variable should always be larger than the other
+vcov = matrix(corr, p, p) + diag(1-corr, p, p)
+vcov[1,1] = 3
+means = rep(0,p) # mean vector
+conf_cont5 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+conf_cont5$V2 = conf_cont5$V1 + abs(rnorm(5, 3^.5, n = n))
+
+synth_cont5 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+synth_cont5$V2 = rnorm(5,3^.5, n = n)
+synth_cont5 = generate_postsynth(synth_cont5)
+
+# categorical case where synthetic data stop preserving variation (ignore some heterogeneity)
+vcov = matrix(corr, p, p) + diag(1-corr, p, p)
+means = rep(0, p)
+conf_cat6 = generate_cat(as_tibble(mvrnorm(means, vcov, n = n), n=p)) # sometimes (rarely, V1 and V2 are unequal)
+synth_cat6 = conf_cat6
+synth_cat6$V2 = synth_cat6$V1
+synth_cat6 = generate_postsynth(synth_cat6)
+
+# categorical case with nested variables
+vcov = matrix(corr, p, p) + diag(1-corr, p, p)
+means = rep(0, p)
+conf_cat7 = generate_cat(as_tibble(mvrnorm(means, vcov, n = n), n=p)) # 
+conf_cat7$V3 = ifelse(conf_cat7$V1==1 & conf_cat7$V2 == 1, rbinom(sum(conf_cat7$V1==1 & conf_cat7$V2 == 1), 1, .7), 0)
+# check this is .7: mean(conf_cat7[conf_cat7$V1==1 & conf_cat7$V2 == 1,]$V3)
+# check this is 0: mean(conf_cat7[!(conf_cat7$V1==1 & conf_cat7$V2 == 1),]$V3)
+synth_cat7 = conf_cat7
+synth_cat7$V3 = rnorm(n, mean(conf_cat7$V3), sqrt(cov(conf_cat7)[3,3]))
+synth_cat7 = generate_postsynth(synth_cat7)
+
+# spike that synthetic data doesn't reproduce
+vcov = matrix(corr, p, p) + diag(1-corr, p, p)
+means = rep(1, p)
+conf_cont8 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+conf_cont8$V1 = ifelse(rbinom(n, 1, .2) == 1, 0, conf_cont8$V1)
+means[1] = mean(conf_cont8$V1)
+vcov = cov(conf_cont8)
+synth_cont8 = generate_postsynth(as_tibble(mvrnorm(means, vcov, n=n),n=p))
+hist(conf_cont8$V1)
+hist(synth_cont8[[1]]$V1)
+
+# truncation that synthetic data doesn't respect
+vcov = matrix(corr, p, p) + diag(1-corr, p, p)
+means = rep(0, p)
+conf_cont9 = as_tibble(mvrnorm(means, vcov, n = n), n=p) 
+conf_cont9$V1 = ifelse(conf_cont9$V1 >2, 2, conf_cont9$V1)
+hist(conf_cont9$V1)
+synth_cont9 = generate_postsynth(as_tibble(mvrnorm(means, vcov, n = nrow(conf_cont9)), n=p))
+hist(synth_cont9[[1]]$V1)
+```
+
+## Decision tree and logistic regression models on the data
+Create the models
+```{r}
+tree_mod <- decision_tree(cost_complexity = tune()) %>%
+  set_mode(mode = "classification") %>%
+  set_engine(engine = "rpart")
+
+lr_mod <- logistic_reg(engine = "glm")
+
+lasso_mod <- logistic_reg(penalty = tune(), mixture = 1) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "glmnet")  
+```
+
+```{r}
+# function to return the discriminator object with propensity scores for synthetic and confidential data
+# and a model
+make_disc <- function(synth, conf, mod, type, param, name) {
+  rpart_rec <- recipe(.source_label ~ ., data = discrimination(synth, conf)$combined_data)
+  
+  if (param == "penalty"){
+    grid = grid_regular(penalty(), levels = 10)
+    # set up discriminator
+    d <- discrimination(synth, conf) %>%
+      add_propensities_tuned(
+        grid = grid, 
+        recipe = rpart_rec,
+        spec = mod
+      ) %>%
+      add_discriminator_auc() %>%
+      add_specks() %>%
+      add_pmse()
+  }
+  else if (param == "cp"){
+    rec =  rpart_rec #%>%
+      #step_dummy(all_nominal_predictors()) %>%
+      #step_poly(all_numeric_predictors(), degree = 2) %>%
+      #step_normalize(all_predictors())
+    grid = grid_regular(cost_complexity(), levels= 10)
+    # set up discriminator
+    d <- discrimination(synth, conf) %>%
+      add_propensities_tuned(
+        grid = grid, 
+        recipe = rec,
+        spec = mod
+      ) %>%
+      add_discriminator_auc() %>%
+      add_specks() %>%
+      add_pmse()
+  }
+  else {
+    # set up discriminator
+    d <- discrimination(synth, conf) %>%
+      add_propensities(
+        recipe = rpart_rec,
+        spec = mod
+      ) %>%
+      add_discriminator_auc() %>%
+      add_specks() %>%
+      add_pmse()
+  }
+  
+  # extract the metrics and variable importance
+  c(d$specks, d$pmse, d$discriminator_auc, type, name)
+}
+```
+
+
+Our goal is to have run a bunch of model types and be comparing the values of these different things (the different metrics) across model types for continuous and categorical data.
+Ideal figure: We have two sets of points, one for continuous data and one for categorical data. We have one panel per metric (pmse, specks, auc) and we make the x axis be the different things that are wrong with the data. For this, we can make a dataset with the columns the different metrics, plus indicator for if it's categorical or continuous and the model name, and then the rows are the different models with different data types. We have four points per x axis tick -- 2 logistic regression, 2 tree, and one of those is categorical and one continuous.
+```{r}
+# iterate through all of the model pairs we've got
+pairs <- list(#list(synth_cont1, conf_cont1, synth_cat1, conf_cat1, "Control"),
+           #list(synth_cont2, conf_cont2, synth_cat2, conf_cat2, "AllOff"),
+           #list(synth_cont3, conf_cont3, synth_cat3, conf_cat3, "MeanWrong"),
+           list(synth_cont4, conf_cont4, synth_cat4, conf_cat4, "CorrWrong")#,
+           #list(synth_cont5, conf_cont5, NA, NA, "BoundedVars"),
+           #list(NA, NA, synth_cat6, conf_cat6, "CutOutGroups"),
+           #list(NA, NA, synth_cat7, conf_cat7, "Nested"),
+           #list(synth_cont8, conf_cont8, NA, NA, "Spike"),
+           #list(synth_cont9, conf_cont9, NA, NA, "Trunc"))
+)
+
+df = data.frame(NULL)
+
+for (elem in pairs) {
+  # for each type of pairing, we need to evaluate both model types on cont and cat data
+  if(sum(!is.na(elem[[1]]))>0){
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], lr_mod, "cont_lr", "", elem[[5]]))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], tree_mod, "cont_tree", "cp",  elem[[5]]))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], lasso_mod, "cont_lasso", "penalty", elem[[5]]))
+  }
+  if(sum(!is.na(elem[[3]]))>0){
+    df = rbind(df, make_disc(elem[[3]], elem[[4]], lr_mod, "cat_lr", "", elem[[5]]))
+    df = rbind(df, make_disc(elem[[3]], elem[[4]], tree_mod, "cat_tree", "cp", elem[[5]]))
+    df = rbind(df, make_disc(elem[[3]], elem[[4]], lasso_mod, "cat_lasso", "penalty", elem[[5]]))
+  }
+}
+colnames(df) = c("specks", "pmse", "auc", "type", "name")
+level_order <- c("Control", "AllOff", "CorrWrong", "MeanWrong", "BoundedVars", "CutOutGroups", "Nested", "Spike", "Trunc") 
+group_colors <- c(cat_lr = "#8537bd", cat_tree = "#3bd146", cont_lr ="#361052", cont_tree = "#0d7515", cont_lasso = "red", cat_lasso = "orange")
+```
+
+```{r}
+fig_a = ggplot(df, aes(x = factor(name, level = level_order), 
+                       group = type, 
+                       color = type, 
+                       y = as.numeric(specks)))+
+  geom_jitter(width = .03, size = 4)+
+  ylab("SPECKS Value")+
+  xlab("")+
+  ggtitle("SPECKS")+
+  scale_color_manual(values=group_colors)
+  
+fig_a
+```
+
+From this figure, I think we can see a few trends. First, the tree-based model generally has higher SPECKS values for all of the ways we messed with the data. 
+For continuous and categorical data with a reversed correlation, the tree-based model has high SPECKS (whereas the logistic regression models have SPECKS comparable to control), indicating that SPECKS and tree-based models are good at picking up mismatches in correlation compared to logistic regression.
+We also observe that it is easier to pick up issues in synthetic data when we have a mismatched mean in one of our variables when the variables are continuous than when they are categorical.
+For continuous data, the tree-based model has a much higher SPECKS than the logistic regression model when our means and variances are slightly off in the synthetic compared to the confidential data.
+This suggests that, if we're using SPECKS as our metric, we should use a tree-based model over logistic regression for continuous data, and we may want to use one for categorical data as well to detect mismatched correlations, though in the absece of this, neither tree- nor logistic regression based models are much different.
+
+```{r}
+fig_b = ggplot(df, aes(x = factor(name, level = level_order), group = type, 
+                       color = type, y = as.numeric(pmse)))+
+  geom_jitter(width = .03, size = 4)+
+  ylab("pMSE Value")+
+  xlab("")+
+  ggtitle("pMSE")+
+  scale_color_manual(values=group_colors)
+fig_b
+```
+
+This figure shows pretty much the same results as the previous, so we're seeing that there's agreement between the different metrics over which modeling approaches help us to detect which issues in which types of data.
+
+```{r}
+fig_c = ggplot(df, aes(x = factor(name, level = level_order), group = type, 
+                       color = type, y = as.numeric(auc)))+
+  geom_jitter(width = .03, size = 4)+
+  ylab("AUC Value")+
+  xlab("")+
+  ggtitle("AUC")+
+  scale_color_manual(values=group_colors)
+fig_c
+```
+
+Again, very similar trends.
+
+Compiling all of the figures into one:
+```{r}
+ggarrange(fig_a + scale_x_discrete(guide = guide_axis(n.dodge = 2)), 
+          fig_b + scale_x_discrete(guide = guide_axis(n.dodge = 2)),
+          fig_c + scale_x_discrete(guide = guide_axis(n.dodge = 2)))
+```
+
+Conclusions:
+I created four pairs of synthetic and categorical data with known mismatches between the synthetic and the categorical data: Control (drawn from same distribution), AllOff (synthetic data have slightly different means and larger variance), CorrWrong (one variable's correlation with the other variables flips sign in the synthetic data), and MeanWrong (one variable's mean is very different in the synthetic data). Each pair has both categorical and continuous variants.
+
+I also created issues specific to categorical and continuous synthetic data. For continuous, I made BoundedVars, where two variables in the confidential data have one always smaller than the other, but I didn't impose that requirement on the synthetic data. For categorical, I made CutOutGroups (synthetic data never includes some rare combinations of variables, representing losing out on rare combinations/subgroups) and Nested (one variable can only take values of 1 when either of 2 variables is 1 in the confidential data, which is not imposed on the synthetic data).
+
+Then, I calculated propensity scores from a basic tree-based model and a basic logistic regression model discriminating between synthetic and categorical data, and I used these propensity scores to calculate three discriminant-based metrics (SPECKS, pMSE, and AUC).
+
+- I observe that the relative standings of model types for data types are consistent across metrics.
+- In general, the tree-based model has higher metric values (detects differences between synthetic and confidential data) for continuous data.
+- It is harder to detect a variable with a mismatched mean in categorical compared to continuous data (metric values are closer to control values for categorical compared to continuous data in the MeanWrong case).
+- For categorical data, tree-based models are better at detecting slight differences from the confidential data in all variables, but logistic regression models are better at detecting a mean that is mismatched between the synthetic and confidential datasets.
+- *For the issues specific to categorical/continuous data, the tree-based models consistently find the issues while the logistic regression models find metric values similar to that of the control.*
+
+
+
+Checking on the lasso model to see if it is isolating the correct variable for the MeanWrong and CorrWrong models
+```{r}
+test_lasso <- function(synth, conf, model, name) {
+  rpart_rec <- recipe(.source_label ~ ., data = discrimination(synth, conf)$combined_data)
+  
+  grid = grid_regular(penalty(), levels = 10)
+  # set up discriminator
+  d <- discrimination(synth, conf) %>%
+    add_propensities_tuned(
+        grid = grid,
+        recipe = rpart_rec,
+        spec = model)
+  
+  penalty <- extract_spec_parsnip(d$discriminator)[["args"]][["penalty"]][[2]]
+  
+  fit <- d$discriminator %>%
+    extract_fit_parsnip() %>% 
+    tidy()
+  
+  ggplot(fit, aes(x = term, y = estimate)) + 
+    geom_point()+
+    ggtitle(paste0(name, ", penalty = ", penalty))
+}
+
+test_lasso(synth_cont3, conf_cont3, lasso_mod, "[Cont] Mean of X1 Off")
+test_lasso(synth_cat3, conf_cat3, lasso_mod, "[Cat] Mean of X1 Off")
+test_lasso(synth_cont4, conf_cont4, lasso_mod, "[Cont] Correlation of X1 with Other Variables Off")
+test_lasso(synth_cat4, conf_cat4, lasso_mod, "[Cat] Correlation of X1 with Other Variables Off")
+```
+
+So in general the lasso regression picks out the "right" term when the mean is off, but either sets everything to 0 or doesn't use the "right" term when the correlations are off.
+
+
+Plotting how the metrics change for different values of Cp with and without cross-validation (with and without doing hyperparameter tuning, which automatically does CV, with only one option in our grid)
+```{r}
+# going to just test this for the meanwrong dataset
+#synth_cont3, conf_cont3
+Cps = grid_regular(cost_complexity(), levels = 30)
+
+rpart_rec <- recipe(.source_label ~ ., data = discrimination(synth_cont3, conf_cont3)$combined_data)
+  
+cp_cross_val = data.frame(matrix(ncol = 5))
+names(cp_cross_val) = c("specks", "pmse", "auc", "cv", "cp")
+for (cp in Cps$cost_complexity){
+  grid = tibble(cost_complexity = c(cp)) # single option for hyperparameter tuning, to test cv
+  # make discriminator
+  d <- discrimination(synth_cont3, conf_cont3) %>%
+    add_propensities_tuned(
+        grid = grid,
+        recipe = rpart_rec,
+        spec = tree_mod) %>%
+      add_discriminator_auc() %>%
+      add_specks() %>%
+      add_pmse()
+  
+  # extract the metrics and variable importance
+  cp_cross_val = rbind(cp_cross_val, c(d$specks, d$pmse, d$discriminator_auc, 1, cp))
+  
+  tree_mod_no_tune = decision_tree(cost_complexity = cp) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "rpart")
+
+  d <- discrimination(synth_cont3, conf_cont3) %>%
+    add_propensities(
+        recipe = rpart_rec,
+        spec = tree_mod_no_tune) %>%
+      add_discriminator_auc() %>%
+      add_specks() %>%
+      add_pmse()
+  cp_cross_val = rbind(cp_cross_val, c(d$specks, d$pmse, d$discriminator_auc, 0, cp))
+}
+
+```
+
+
+```{r}
+ggplot(cp_cross_val, aes(x = cp, y = specks, group = as.factor(log(cv)), color = as.factor(cv))) +
+  geom_line()
+
+ggplot(cp_cross_val, aes(x = cp, y = auc, group = as.factor(cv), color = as.factor(cv))) +
+  geom_line()
+
+ggplot(cp_cross_val, aes(x = cp, y = pmse, group = as.factor(cv), color = as.factor(cv))) +
+  geom_line()
+```
+
+When we use cross-validation (through using add_propensities_tuned but forcing it to only have one option), we observe that in general the metrics are similar to not using cross validation for various values of cp. As cp gets larger, so trees get shallower, we see a stair-step cutoff and we potentially see overfitting (red above blue) for very small cp without cross-validation, as well as blue above red (so cross-validation improves our fits for some large-ish values of cp) at some points. Would like to discuss!

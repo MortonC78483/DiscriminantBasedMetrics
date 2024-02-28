@@ -1,0 +1,236 @@
+---
+title: "jan_update_2.2"
+format:
+  html:
+    self-contained: true
+    theme: default
+    code-fold: true
+    code-summary: "Show the code"
+    embed-resoures: true
+    toc: true
+---
+
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all('../../syntheval')
+library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+
+set.seed(1)
+```
+
+This piece of the January Update concerns the second part of the project.
+
+In this project, I'm trying to find ways to detect when synthesized data isn't just generally a poor match for original confidential data, but when it specifically matches confidential data less for a minority group.
+
+In the previous part of the project, I extracted the dataset from the ACS that I will be using. In this part of the project, I will show how a pairwise modeling approach can indicate which variables are not being well matched by the synthetic data. Specifically, I suggest that this approach is useful for continuous variables, but not for categorical variables.
+
+This analysis was inspired by this paper (https://arxiv.org/pdf/2109.12717.pdf), because I wanted to see if the pairwise approach they show here can be used to detect when synthetic data aren't matching minority groups as well as they are majority groups.
+
+The pairwise modeling approach selects pairs of variables in the synthetic and confidential data, then fits a discriminator model based on only these two variables. If the model is able to discriminate well between the datasets based on these two variables alone, it suggests that these variables may be among the most "off" in the synthetic and confidential datasets.
+
+```{r}
+# load data
+data_mi <- read_csv("../data/data_mi.csv")
+data_mi <- as.data.frame(unclass(data_mi),stringsAsFactors=TRUE)
+data_mi$pov <- as.factor(data_mi$pov)
+data_mi$BLACK <- as.factor(data_mi$BLACK)
+```
+
+**EM: This is almost exactly like the quicksynth() function I made haha!**
+
+```{r}
+# function that takes start data and confidential data, and synthesizes dataset
+synth_pov <- function(start_data, conf_data, var_order){
+  # synthesize categorical first, then continuous
+  visit_sequence = visit_sequence(var_order, start_data, type = "manual")
+  roadmap = roadmap(conf_data, start_data, visit_sequence)
+  recipe = construct_recipes(roadmap = roadmap)
+  
+  tree_cl <- parsnip::decision_tree(cost_complexity = .0001) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "rpart")
+  tree_reg <- parsnip::decision_tree(cost_complexity = .0001) %>%
+    set_mode(mode = "regression") %>%
+    set_engine(engine = "rpart")
+  
+  synth_algorithms = list()
+  for (i in 1:length(var_order)){
+    if(class(conf_data[,var_order[i]]) == "factor"){
+      synth_algorithms[[i]] = tree_cl
+    } else{
+      synth_algorithms[[i]] = tree_reg
+    }
+  }
+  
+  synth_spec = synth_spec(roadmap,
+                          synth_algorithms = synth_algorithms,
+                          recipe,
+                          predict_methods = sample_rpart)
+  
+  # noise
+  noise <- noise(roadmap = roadmap,
+                 add_noise = FALSE,
+                 exclusions = 0)
+  
+  # constraints
+  constraints <- constraints(roadmap = roadmap,
+                             constraints = NULL,
+                             max_z = 0)
+  
+  replicates <- replicates(replicates = 1,
+                           workers = 1,
+                           summary_function = NULL)
+  
+  # create a presynth object
+  presynth1 <- presynth(
+    roadmap = roadmap,
+    synth_spec = synth_spec,
+    noise = noise, 
+    constraints = constraints,
+    replicates = replicates
+  )
+  synthesized = synthesize(presynth1, progress = TRUE)
+  synthesized
+}
+```
+
+I decided to create two synthetic datasets. The first is created from all of the confidential data, and the second is created from only the majority group (people above the poverty line). Thus, the first represents a "good" synthesis, and the second a "bad" synthesis that does not accurately represent a specific minority group in the data. Later on in the project, I'm going to use the BLACK indicator variable and do a similar analysis with it as the majority/minority indicator.
+
+My intention here is to test whether the pairwise approach picks out that, for the "good" synthesis, poverty status should not be useful for the discriminator to tell apart the synthetic and confidential datasets. However, for the "bad" synthesis, all of the associations between people in poverty and other variables should disappear compared to the confidential data, so the pairwise approach may be able to pick up on this and show higher discriminant-based metric values for the pairs of variables including poverty status for the "bad" synthesis. This would allow an analyst to see which grouping variables may be enabling the discriminator model to tell apart synthetic and confidential data, thus informing them about potential shortcomings of the synthetic data for specific groups.
+
+
+```{r}
+# synthesize (order # 1)
+start_data = data.frame("pov" = data_mi[,"pov"])
+conf_data = data_mi
+
+conf_data_nopov = data_mi %>%
+  filter(pov == 0)
+start_data_nopov = data.frame("pov" = as.factor(rep(0, nrow(data_mi))))
+
+synthesized <- synth_pov(start_data, conf_data, c("SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "BLACK", "FTOTINC", "AGE"))
+synthesized_nopov <- synth_pov(start_data_nopov, conf_data_nopov, c("SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "BLACK", "FTOTINC", "AGE"))
+
+# reorder columns to match order of synthesis (for pairwise)
+data_mi <- data_mi[,colnames(synthesized$synthetic_data)]
+data_mi_nopov <- data_mi[,colnames(synthesized_nopov$synthetic_data)]
+
+# add back in people in poverty
+synthesized_nopov$synthetic_data$pov <- permute(data_mi$pov)
+```
+
+**EM: I haven't seen this approach before, and I'm wondering if this is something you came up with (which is really cool) or if you've read about this somewhere. If it's the latter, I'd love to read where you got this idea from! I also noticed that you did not synthesize the poverty variable, and I'm just wondering what your rationale behind that was for clarity, Also, thinking back to my project, is there a reason you used the variable order you did? Do you think that other orderings, specifically orderings that favor variables correlated to poverty status, would produce different results?**
+
+
+ 
+```{r}
+# given a discriminator, calculates the discriminant-based metrics using a tree model.
+calc_metrics <- function(discriminator){
+  # Evaluate discriminant-based metrics on the data using tree-based model
+  tree_mod <- decision_tree(cost_complexity = tune()) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "rpart")
+  
+  rpart_rec <- recipe(.source_label ~ ., data = discriminator$combined_data)
+  
+  grid = grid_regular(cost_complexity(), levels= 10)
+  
+  # set up discriminator
+  d <- discriminator %>%
+    add_propensities_tuned(
+      grid = grid, 
+      recipe = rpart_rec,
+      spec = tree_mod
+    ) %>%
+    add_discriminator_auc() %>%
+    add_specks() %>%
+    add_pmse()
+  res = c(d$discriminator_auc, d$pmse, d$specks)
+  return(c(res$.estimate[2], res$.pmse[2], res$.specks[2]))
+}
+```
+
+Calculating the discriminant-based metrics for all pairwise combinations of the data:
+```{r}
+auc_mat <- matrix(0, ncol(data_mi), ncol(data_mi))
+pmse_mat <- matrix(0, ncol(data_mi), ncol(data_mi))
+specks_mat <- matrix(0, ncol(data_mi), ncol(data_mi))
+auc_mat_nopov <- matrix(0, ncol(data_mi_nopov), ncol(data_mi_nopov))
+pmse_mat_nopov <- matrix(0, ncol(data_mi_nopov), ncol(data_mi_nopov))
+specks_mat_nopov <- matrix(0, ncol(data_mi_nopov), ncol(data_mi_nopov))
+```
+
+```{r}
+n = ncol(data_mi)
+for (i in 1:(n-1)){
+  for (j in (i+1):n){
+    pair_synthesized = synthesized$synthetic_data[,c(i,j)]
+    pair_synthesized_nopov = synthesized_nopov$synthetic_data[,c(i,j)]
+    pair_conf = data_mi[,c(i,j)]
+    pair_conf_nopov = data_mi_nopov[,c(i,j)]
+    
+    # original synthesis
+    disc = discrimination(pair_synthesized, pair_conf)
+    res = calc_metrics(disc)
+    auc_mat[i,j] = res[1]
+    pmse_mat[i,j] = res[2]
+    specks_mat[i,j] = res[3]
+    
+    # synthesized from only people not in poverty
+    disc_nopov = discrimination(pair_synthesized_nopov, pair_conf_nopov)
+    res_nopov = calc_metrics(disc_nopov)
+    auc_mat_nopov[i,j] = res_nopov[1]
+    pmse_mat_nopov[i,j] = res_nopov[2]
+    specks_mat_nopov[i,j] = res_nopov[3]
+  }
+}
+```
+
+Plotting the matrices as heatmaps
+```{r}
+plot_heatmap <- function(data, names){
+  data[data==0] <- NA
+  rownames(data) <- names
+  colnames(data) <- names
+  data = reshape2::melt(data)
+  ggplot(data, aes(Var1, Var2, fill = value))+
+    geom_tile()+
+    theme_classic()
+}
+```
+
+```{r}
+plot_heatmap(auc_mat, c("pov", "SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "RACE", "FTOTINC", "AGE"))
+plot_heatmap(auc_mat_nopov, c("pov", "SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "RACE", "FTOTINC", "AGE"))
+```
+
+```{r}
+plot_heatmap(pmse_mat, c("pov", "SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "RACE", "FTOTINC", "AGE"))
+plot_heatmap(pmse_mat_nopov, c("pov", "SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "RACE", "FTOTINC", "AGE"))
+```
+
+```{r}
+plot_heatmap(specks_mat, c("pov", "SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "RACE", "FTOTINC", "AGE"))
+plot_heatmap(specks_mat_nopov, c("pov", "SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "RACE", "FTOTINC", "AGE"))
+```
+These plots pick out family total income, not poverty status, as the problem variable. We can see this because the second plot in each of the three pairs, which is the plot that comes from the data synthesized from only the majority group (the "bad" synthesis), has higher metric values for pairs of variables including family total income. I believe this is because family total income is highly correlated to poverty status, but poverty status is binary, so it's less easy to distinguish between datasets when you only have a cumulative four categories (such as when we restrict to binary poverty status and binary veteran status) compared to when you have two categories and one continuous variable (such as when we restrict to continuous family total income and binary veteran status). This analysis suggests that a pairwise approach may indeed be able to unearth when synthetic data are doing a poor job at serving specific minority groups, but that it is best as a first pass to identify these associations (it does not tell us, for example, whether the "bad" synthesis is easy to tell apart from the confidential data on the low or high end of the income distribution) and that it does not seem to be able to identify binary categorical variables, like poverty status, as contributing to issues of biased utility in synthetic datasets.
+
+**EM: Just to make sure I understand, the results show that when using a discriminator to distinguish between the synthetic and confidential data using a pair of variables, the pairs including total family income had the best performing models for the "bad" synthesis (i.e., the synthesis where everyone was from the majority class)? If so, that makes sense to me assuming the family income values for just the minority class are less varied than the values with both the majority and minority classes. I wonder if you would see the same thing the income values came from the same distribution for each class (I'm thinking you wouldn't, which begs the question if you could pick out potential "problem" variables based on their association with the imbalanced sensitive variable).**
+
+**EM: I'm also not too familiar on issues with using only categorical variables as inputs for a discriminator. In my mind, of the distribution of the categorical variables is different for two types of observations, then a discriminator could easily discriminate between them. I'm guessing this isn't always the case?**
+
+**EM: Final note, but I'm having a hard time understanding what I would do with this information. Is this identifying variables at higher risks of retaining less utility if a synthesis does not take into account all of the values of an imbalanced sensitive variable? Also, how is the "bad" synthesis example related to syntheses in practice?**

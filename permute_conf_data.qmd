@@ -1,0 +1,202 @@
+---
+title: "permute_conf_data"
+format:
+  html:
+    theme: default
+---
+
+This script is meant to pull IPUMS data and test discriminant-based metrics on the data using confidential data and
+permuted gender confidential data. This is to benchmark the results we get when we do this with synthesized data.
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all('../syntheval')
+library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+```
+```{r}
+data <- read_ipums_micro("data/usa_00004.xml")
+data <- data |>
+  mutate(across(where(is.labelled), ~as_factor(lbl_clean(.x))))
+```
+
+
+```{r}
+states <- c("Michigan")
+vars <- c("STATEFIP", "PERNUM", "SEX", "AGE", "RACE", 
+           "HCOVANY", "EDUC", "EMPSTAT", "FTOTINC", "POVERTY",
+           "VETSTAT")
+
+```
+
+```{r}
+data_mi <- data %>%
+  select(all_of(vars)) %>%
+  filter(STATEFIP %in% states,
+         PERNUM == 1) 
+# recode factor variables (vetstat, sex, race, healthcare coverage, employment status didn't need recoding)
+data_mi$EDUC <- recode(data_mi$EDUC, 
+               "N/A or no schooling" = "N/A",
+               "Nursery school to grade 4" = "Less than high school",
+               "Grade 5, 6, 7, or 8" = "Less than high school",
+               "Grade 9" = "Some high school",
+               "Grade 10" = "Some high school",
+               "Grade 11" = "Some high school",
+               "Grade 12" = "High school",
+               "1 year of college" = "Some college",
+               "2 years of college" = "Some college",
+               "4 years of college" = "4+ years of college",
+               "5+ years of college" = "4+ years of college")
+
+# recode numeric variables (age, poverty (as % of poverty threshold), and income)
+data_mi$AGE <- as.numeric(as.character(recode(data_mi$AGE, 
+                      "Less than 1 year old"= "0",
+                      "90 (90+ in 1980 and 1990)" = "90")))
+data_mi$FTOTINC <- as.numeric(as.character(recode(data_mi$FTOTINC,
+                                     "No income (1950-2000, ACS/PRCS) " = "0")))
+data_mi$POVERTY <- as.numeric(as.character(recode(data_mi$POVERTY,
+                                     "501 percent or more of poverty threshold" = "500",
+                                     "1 percent or less of poverty threshold (including 0 or negative income)" = "0")))
+
+# set character NAs to be NA
+data_mi[data_mi == "N/A"]<-NA 
+
+# complete case analysis of adults only
+data_mi <- data_mi %>%
+  filter(AGE >= 19,
+         complete.cases(.)) %>%
+  select(-c("STATEFIP", "PERNUM"))
+
+# get rid of unused NA levels in factors (educ, empstat, vetstat)
+data_mi = droplevels(data_mi)
+```
+
+```{r}
+table(data_mi$SEX, data_mi$RACE)
+prop.table(table(data_mi$SEX, data_mi$HCOVANY), 1)
+prop.table(table(data_mi$SEX, data_mi$EMPSTAT), 1)
+prop.table(table(data_mi$SEX, data_mi$EDUC), 1)
+prop.table(table(data_mi$SEX, data_mi$VETSTAT), 1)
+
+ggplot(data_mi, aes(group = SEX, x = log(FTOTINC), color = SEX))+
+  geom_density()
+
+ggplot(data_mi, aes(group = SEX, x = POVERTY, color = SEX))+
+  geom_density()
+
+data_mi <- data_mi %>%
+  select(-c(RACE))
+```
+
+We now get the confidential data and permuted confidential data
+```{r}
+set.seed(1)
+perm_data = data_mi
+perm_data$SEX = permute(data_mi$SEX)
+```
+
+```{r}
+# Evaluate discriminant-based metrics on the data using tree-based model
+tree_mod <- decision_tree(cost_complexity = tune()) %>%
+  set_mode(mode = "classification") %>%
+  set_engine(engine = "rpart")
+
+rpart_rec <- recipe(.source_label ~ ., data = discrimination(perm_data, data_mi)$combined_data)
+
+grid = grid_regular(cost_complexity(), levels= 10)
+# set up discriminator
+d <- discrimination(perm_data, data_mi) %>%
+  add_propensities_tuned(
+    grid = grid, 
+    recipe = rpart_rec,
+    spec = tree_mod
+  ) %>%
+  add_discriminator_auc() %>%
+  add_specks() %>%
+  add_pmse()
+d$discriminator_auc
+d$pmse
+d$specks
+```
+
+When we run a tree-based model (tuned cp) on our permuted vs real confidential data, we get results of AUC: .577, pMSE: .0072, SPECKS: .109
+These all have it as slightly harder to discriminate than the synthesized versions, but not much harder. They indicate that I probably didn't do something wrong, since they're quite low. This also indicates that removing the associations between gender and everything else doesn't make it much easier to tell the datasets apart with a tree, probably because there are a lot of 
+
+```{r}
+# Evaluate discriminant-based metrics on the data using random forest
+rand_forest_mod <- rand_forest(
+  mode = "classification",
+  engine = "randomForest",
+  mtry = NULL,
+  trees = NULL,
+  min_n = NULL
+)
+
+rpart_rec <- recipe(.source_label ~ ., data = discrimination(perm_data, data_mi)$combined_data)
+
+# set up discriminator
+d_rf <- discrimination(perm_data, data_mi) %>%
+  add_propensities(
+    recipe = rpart_rec,
+    spec = rand_forest_mod
+  ) %>%
+  add_discriminator_auc() %>%
+  add_specks() %>%
+  add_pmse()
+d_rf$discriminator_auc
+d_rf$pmse
+d_rf$specks
+```
+
+The random forest has AUC: .535, pMSE: .0572, SPECKS: .0746. AUC says less easy to tell apart with random forest, pMSE says easier to tell apart with random forest, SPECKS says less easy to tell apart with random forest. 
+
+```{r}
+# Evaluate discriminant-based metrics on the data using random forest
+lasso_mod <- logistic_reg(penalty = tune(), mixture = 1) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "glmnet")  
+
+lasso_rec <- recipe(.source_label ~ ., data = discrimination(perm_data, data_mi)$combined_data) %>%
+  step_dummy(all_nominal_predictors()) 
+lasso_rec <- lasso_rec %>%
+  step_interact(terms = ~ SEX_Female:(starts_with("EDUC")+
+                                        starts_with("EMPSTAT")+
+                                        all_numeric_predictors()), keep_original_cols = TRUE)
+
+# make sure interaction worked correctly
+colnames(bake(prep(lasso_rec, training = discrimination(perm_data, data_mi)$combined_data), 
+              discrimination(perm_data, data_mi)$combined_data))
+
+# set up discriminator
+grid = grid_regular(penalty(), levels = 20)
+# set up discriminator
+d_lasso <- discrimination(perm_data, data_mi) %>%
+  add_propensities_tuned(
+    grid = grid,
+    recipe = lasso_rec,
+    spec = lasso_mod
+  ) %>%
+  add_discriminator_auc() %>%
+  add_specks() %>%
+  add_pmse()
+
+d_lasso$discriminator_auc
+d_lasso$pmse
+d_lasso$specks
+
+library(vip)
+
+d_lasso$discriminator %>%
+  extract_fit_parsnip() %>%
+  vip()
+```
+
+The lasso with interaction between sex and the other variables identifies the interaction between sex and veteran status as most important (which makes sense, since this is the strongest association with sex and another variable). AUC of .582, pMSE of .00643, SPECKS of .118.
