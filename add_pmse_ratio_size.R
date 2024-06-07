@@ -9,7 +9,7 @@
 #' @param size size of dataset to resample from in each bootstrap sample, default to normal pMSE ratio
 #' @param times The number of bootstrap samples.
 #'
-#' @return A discrimination with pMSE
+#' @return A discrimination with pMSE and pMSE ratio, and the denominators used (for uncertainty quantification)
 #' 
 #' @family Utility metrics
 #' 
@@ -148,6 +148,7 @@ add_pmse_ratio_scaled <- function(discrimination, split = TRUE, prop = 3 / 4, si
       tibble::tibble(.null_pmse = c(mean_null_pmse_training, mean_null_pmse_testing))
     ) %>%
       dplyr::mutate(.pmse_ratio = .data$.pmse / .data$.null_pmse)
+    denoms = pmse_null_testing
     
   } else {
     
@@ -156,11 +157,11 @@ add_pmse_ratio_scaled <- function(discrimination, split = TRUE, prop = 3 / 4, si
       tibble::tibble(.null_pmse = mean_null_pmse_overall)
     ) %>%
       dplyr::mutate(.pmse_ratio = .data$.pmse / .data$.null_pmse)
-    
+    denoms = pmse_null_training
   }
   
   discrimination$pmse <- pmse
   
-  return(discrimination)
+  return(list(discrimination, denoms))
   
 }
