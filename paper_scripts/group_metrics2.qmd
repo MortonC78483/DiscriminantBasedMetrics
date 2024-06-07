@@ -1,12 +1,16 @@
 ---
-title: "pmse_ratio"
+title: "group_metrics2"
+format: pdf
+---
+
+---
+title: "group_metrics"
 format:
   html:
     theme: default
 ---
 
-This script implements the two-model approach for the pMSE ratio discriminant-based metric.
-For each element of the denominator of the pMSE ratio for the larger group, it will take a sample of size n (where n is the size of the smaller group) and then bootstrap this sample, taking a different initial sample each time. This will (according to the proof) create something with the same expected value under the null distribution as the minority group, allowing me to compare the 2-model approach's pMSE ratios.
+One model adn two model approach for poverty
 
 ```{r}
 library(tidyverse)
@@ -18,7 +22,6 @@ library("data.table")
 library(recipes)
 library(devtools)
 load_all("../../syntheval")
-#library(syntheval)
 library(dials)
 library(tune)
 library(gtools)
@@ -26,14 +29,11 @@ library(MASS)
 library(caret)
 library(gt)
 library(ggpubr)
-# source("../add_pmse_group.R")
-source("../add_pmse_ratio_size.R")
-#source("../add_pmse_group.R")
-#source("../add_pmse_ratio_group.R")
-# source("../add_discriminator_auc_group.R")
-# source("../add_specks_group.R")
+source("../add_pmse_group.R")
+source("../permutation_sig.R")
 set.seed(78483)
 ```
+
 
 Load in data
 ```{r}
@@ -188,6 +188,7 @@ make_all_synth_datasets <- function(data_mi){
 }
 ```
 
+
 ```{r}
 calc_disc <- function(discriminator){
   # Evaluate discriminant-based metrics on the data using tree-based model
@@ -210,69 +211,61 @@ calc_disc <- function(discriminator){
 }
 ```
 
+Going to try two-model approach now instead to see if that improves things
 ```{r}
-# # load data
-# data_mi <- read_csv("../data/data_mi.csv")
-# data_mi <- as.data.frame(unclass(data_mi),stringsAsFactors=TRUE)
-# data_mi$pov <- as.factor(data_mi$pov)
-# data_mi$BLACK <- as.factor(data_mi$BLACK)
-# 
-# synth_list = make_all_synth_datasets(data_mi)
-# synth_pov_good = synth_list[[1]]$synthetic_data
-# synth_pov_good <- process_data(synth_pov_good)
-# 
-# synth_pov_med = synth_list[[2]]$synthetic_data
-# synth_pov_med <- process_data(synth_pov_med)
-#   
-# synth_pov_bad = synth_list[[3]]$synthetic_data
-# synth_pov_bad <- process_data(synth_pov_bad)
-# 
-# synth_nopov_med = synth_list[[4]]$synthetic_data
-# synth_nopov_med <- process_data(synth_nopov_med)
-# 
-# synth_nopov_bad = synth_list[[5]]$synthetic_data
-# synth_nopov_bad <- process_data(synth_nopov_bad)
+fit_two_model <- function(synth, conf, calc_disc, synth_type){
+  # pov disc
+  synth_pov = synth[synth$pov == 1,]
+  conf_pov = conf[conf$pov == 1,]
+  disc = discrimination(synth_pov, conf_pov)
+  res = calc_disc(disc)
+  
+  res <- res %>%
+    add_discriminator_auc() %>%
+    add_specks()
+  
+  auc_pov = res$discriminator_auc$.estimate[2]
+  specks_pov = res$specks$.specks[2]
+  
+  # no pov disc
+  synth_nopov = synth[synth$pov == 0,]
+  conf_nopov = conf[conf$pov == 0,]
+  disc = discrimination(synth_nopov, conf_nopov)
+  res = calc_disc(disc)
+  
+  res <- res %>%
+    add_discriminator_auc() %>%
+    add_specks()
+  
+  auc_nopov = res$discriminator_auc$.estimate[2]
+  specks_nopov = res$specks$.specks[2]
+  
+  return(data.frame(aucs = c(auc_pov, auc_nopov), 
+             speckss = c(specks_pov, specks_nopov), 
+             synth_type = rep(synth_type, 2),
+             pov_class = c("pov", "nopov")))
+  
+}
 ```
 
-
+Given a discriminator, get every number of interest (one and two model approaches)
 ```{r}
-corrected_pmse_ratio <- function(synth, times, minority_size){
-  # create no poverty sub-dataset
-  conf_nopov <- data_mi %>%
-    filter(pov == 0)
-  synth_nopov <- synth %>%
-    filter(pov == 0)
-  disc_nopov <- discrimination(synth_nopov, conf_nopov)
+get_nums <- function(synth, data_mi, calc_disc, synth_type){
+  disc = discrimination(synth, data_mi)
+  res = calc_disc(disc)
+  res <- res %>%
+    add_discriminator_auc(group = c("pov")) %>%
+    add_specks(group = c("pov"))
+  auc <- res$discriminator_auc$.estimate[3:4]
+  specks <- res$specks$.specks[3:4]
+  one_model_df <- data.frame(aucs = auc, 
+                             speckss = specks, 
+                             synth_type = rep(synth_type, 2),
+                             pov_class = c("nopov", "pov"))
+    
+  two_model_df <- fit_two_model(synth, data_mi, calc_disc, synth_type)
   
-  # fit model wtih pmse to our no poverty sub-dataset
-  res_nopov <- calc_disc(disc_nopov)
-  # fit pmse ratio using size of minority group
-  obj <- res_nopov %>%
-    add_pmse() %>%
-    add_pmse_ratio_scaled(size = minority_size, times = times)
-  res_nopov <- obj[[1]]
-  denoms_nopov <- obj[[2]]
-  
-  # create poverty sub-dataset
-  conf_pov <- data_mi %>%
-    filter(pov == 1)
-  synth_pov <- synth %>%
-    filter(pov == 1)
-  disc_pov <- discrimination(synth_pov, conf_pov)
-  
-  # fit model wtih pmse to our no poverty sub-dataset
-  res_pov <- calc_disc(disc_pov)
-  
-  # fit pmse ratio using size of minority group
-  obj <- res_pov %>%
-    add_pmse() %>%
-    add_pmse_ratio_scaled(size = minority_size, times = times)
-  res_pov <- obj[[1]]
-  denoms_pov <- obj[[2]]
-  
-  return(list(res_nopov$pmse$.pmse_ratio[2], res_pov$pmse$.pmse_ratio[2], 
-              sd(res_nopov$pmse$.pmse[2]/denoms_nopov)/sqrt(length(denoms_nopov)-1),
-              sd(res_pov$pmse$.pmse[2]/denoms_pov)/sqrt(length(denoms_pov)-1)))
+  return(list(one_model_df, two_model_df))
 }
 ```
 
@@ -282,63 +275,50 @@ data_mi <- read_csv("../data/data_mi.csv")
 data_mi <- as.data.frame(unclass(data_mi),stringsAsFactors=TRUE)
 data_mi$pov <- as.factor(data_mi$pov)
 data_mi$BLACK <- as.factor(data_mi$BLACK)
+times = 5
 
-n_ratios = 5
-df_pov <- data.frame(matrix(ncol = 3, nrow = 0))
-colnames(df_pov) <- c("pmse", "synth_type", "pov_class")
+one_model_df <- data.frame(matrix(ncol = 4, nrow = 0))
+colnames(one_model_df) <- c("aucs", "speckss", "synth_type", "pov_class")
 
-for(i in 1:n_ratios){
+two_model_df <- data.frame(matrix(ncol = 4, nrow = 0))
+colnames(two_model_df) <- c("aucs", "speckss", "synth_type", "pov_class")
+
+for (time in 1:times){
   synth_list = make_all_synth_datasets(data_mi)
   synth_pov_good = synth_list[[1]]$synthetic_data
   synth_pov_good <- process_data(synth_pov_good)
+  list_dfs <- get_nums(synth_pov_good, data_mi, calc_disc, "good")
+  one_model_df <- rbind(one_model_df, list_dfs[[1]])
+  two_model_df <- rbind(two_model_df, list_dfs[[2]])
   
   synth_pov_med = synth_list[[2]]$synthetic_data
   synth_pov_med <- process_data(synth_pov_med)
-    
+  list_dfs <- get_nums(synth_pov_med, data_mi, calc_disc, "pov_med")
+  one_model_df <- rbind(one_model_df, list_dfs[[1]])
+  two_model_df <- rbind(two_model_df, list_dfs[[2]])
+  
   synth_pov_bad = synth_list[[3]]$synthetic_data
   synth_pov_bad <- process_data(synth_pov_bad)
+  list_dfs <- get_nums(synth_pov_bad, data_mi, calc_disc, "pov_bad")
+  one_model_df <- rbind(one_model_df, list_dfs[[1]])
+  two_model_df <- rbind(two_model_df, list_dfs[[2]])
   
   synth_nopov_med = synth_list[[4]]$synthetic_data
   synth_nopov_med <- process_data(synth_nopov_med)
+  list_dfs <- get_nums(synth_nopov_med, data_mi, calc_disc, "nopov_med")
+  one_model_df <- rbind(one_model_df, list_dfs[[1]])
+  two_model_df <- rbind(two_model_df, list_dfs[[2]])
   
   synth_nopov_bad = synth_list[[5]]$synthetic_data
   synth_nopov_bad <- process_data(synth_nopov_bad)
-  
-  minority_size = sum(data_mi$pov == 1)
-  times = 10
-  
-  pmse_ratio_good <- corrected_pmse_ratio(synth_pov_good, times, minority_size)
-  pmse_ratio_pov_med <- corrected_pmse_ratio(synth_pov_med, times, minority_size)
-  pmse_ratio_pov_bad <- corrected_pmse_ratio(synth_pov_bad, times, minority_size)
-  pmse_ratio_nopov_med <- corrected_pmse_ratio(synth_nopov_med, times, minority_size)
-  pmse_ratio_nopov_bad <- corrected_pmse_ratio(synth_nopov_bad, times, minority_size)
-  
-  pmse_ratios = c(c(pmse_ratio_nopov_bad[[1]], pmse_ratio_nopov_bad[[2]]),
-                c(pmse_ratio_nopov_med[[1]], pmse_ratio_nopov_med[[2]]),
-                c(pmse_ratio_good[[1]], pmse_ratio_good[[2]]), 
-                c(pmse_ratio_pov_med[[1]], pmse_ratio_pov_med[[2]]),
-                c(pmse_ratio_pov_bad[[1]], pmse_ratio_pov_bad[[2]]))
-                
-  synth_type = c("nopov_bad", "nopov_bad", "nopov_med", "nopov_med", "good", "good", "pov_med", "pov_med", "pov_bad", "pov_bad")
-  pov_class = c("nopov", "pov", "nopov", "pov", "nopov", "pov", "nopov", "pov", "nopov", "pov")
-  synth_type = factor(synth_type, levels = c("nopov_bad", "nopov_med", "good", "pov_med", "pov_bad"))
-  
-  plot <- data.frame(pmse = pmse_ratios, synth_type = synth_type, pov_class = pov_class)
-  df_pov <- rbind(df_pov, plot)
+  list_dfs <- get_nums(synth_nopov_bad, data_mi, calc_disc, "nopov_bad")
+  one_model_df <- rbind(one_model_df, list_dfs[[1]])
+  two_model_df <- rbind(two_model_df, list_dfs[[2]])
 }
 ```
 
-Save results
+Save dataframes
 ```{r}
-write_csv(df_pov, "pmse_ratio_pov.csv")
+write.csv(one_model_df, "one_model_df_pov.csv")
+write.csv(two_model_df, "two_model_df_pov.csv")
 ```
-
-
-
-
-
-
-
-
-
-

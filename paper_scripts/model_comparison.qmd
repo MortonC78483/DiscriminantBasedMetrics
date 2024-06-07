@@ -1,0 +1,347 @@
+---
+title: "model_comparison"
+format: pdf
+---
+
+Running simulation based perturbations of the discriminant-based metrics to tell which models we should use in different settings, esp majority/minority settings.
+
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all('../../syntheval')
+library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+
+set.seed(78483)
+```
+
+```{r}
+n=10000 # number of samples
+corr=.7 # correlation
+p = 10 # number of variables
+
+generate_postsynth <- function(data){
+  list(
+    synthetic_data = data,
+    jth_synthesis_time = data.frame(
+      variable = factor(colnames(data.frame(data)))
+    )
+  )  %>%
+  structure(class = "postsynth")
+}
+```
+
+```{r}
+# Same distribution
+vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+means = rep(0,p) # mean vector
+conf1 = as_tibble(mvrnorm(means, vcov, n = n), n = p)
+synth1 = generate_postsynth(as_tibble(mvrnorm(means, vcov, n = n), n=p))
+
+# larger variances, slightly off means
+vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+means = rep(0,p) # mean vector
+conf2 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+means = sample(c(-.2,.2), 10, replace = T) # mean vector
+vcov = matrix(2*corr, p, p) + diag(4-2*corr, p, p) # vcov matrix, p on all off-diagonal variables
+synth2 = generate_postsynth(as_tibble(mvrnorm(means, vcov, n = n), n=p))
+
+# one variable centered at wrong value
+vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+means = rep(0,p) # mean vector
+conf3 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+means[1] = 2
+synth3 = generate_postsynth(as_tibble(mvrnorm(means, vcov, n = n), n=p))
+
+# relationship reversed (between V1 and everything else)
+vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+means = rep(0,p) # mean vector
+conf4 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+vcov[1,2:p] = -rep(corr, p-1)
+vcov[2:p,1] = -rep(corr, p-1)
+synth4 = generate_postsynth(as_tibble(mvrnorm(means, vcov, n = n), n=p))
+```
+
+```{r}
+# create models
+tree_mod <- decision_tree(cost_complexity = tune()) %>%
+  set_mode(mode = "classification") %>%
+  set_engine(engine = "rpart")
+
+
+lr_mod <- logistic_reg(engine = "glm") %>%
+  set_mode(mode = "classification")
+
+lasso_mod <- logistic_reg(penalty = tune(), mixture = 1) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "glmnet")  
+
+rf_mod <- rand_forest(
+    mode = "classification",
+    engine = "randomForest",
+    mtry = NULL,
+    trees = NULL,
+    min_n = NULL
+)
+```
+
+```{r}
+# function to return the discriminator object with propensity scores for synthetic and confidential data
+# and a model
+# provide synthetic data, confidential data, model, name of model used (type), name of data (name), and parameter to tune, if any
+make_disc <- function(synth, conf, mod, type, name, param = "none") {
+  rpart_rec <- recipe(.source_label ~ ., data = discrimination(synth, conf)$combined_data)
+  
+  if (type == "lr"){
+    rpart_rec <- rpart_rec %>%
+        step_poly(all_numeric_predictors(), degree = 2) %>%
+        step_normalize(all_predictors())
+  }
+  if (param == "none"){
+    # set up discriminator
+    d <- discrimination(synth, conf) %>%
+      add_propensities(
+        recipe = rpart_rec,
+        spec = mod
+      ) %>%
+      add_discriminator_auc() %>%
+      add_specks() %>%
+      add_pmse()
+  }
+  else{
+    if (param == "penalty"){ # lasso model
+      rec = rpart_rec %>%
+        step_poly(all_numeric_predictors(), degree = 2) %>%
+        step_normalize(all_predictors())
+      grid = grid_regular(penalty(), levels = 10)
+    }
+    else if (param == "cp"){ # tree model
+      rec = rpart_rec 
+      grid = grid_regular(cost_complexity(), levels= 10)
+    }
+    # set up discriminator
+    d <- discrimination(synth, conf) %>%
+      add_propensities_tuned(
+        grid = grid, 
+        recipe = rec,
+        spec = mod
+      ) %>%
+      add_discriminator_auc() %>%
+      add_specks() %>%
+      add_pmse()
+  }
+  # extract the metrics
+  c(d$pmse$.pmse[1], d$specks$.specks[1], d$discriminator_auc$.estimate[1], #train
+    d$pmse$.pmse[2], d$specks$.specks[2], d$discriminator_auc$.estimate[2], #test
+    type, name)
+}
+```
+
+```{r}
+# iterate through all of the model pairs we've got
+pairs <- list(list(synth1, conf1, "Control"),
+           list(synth2, conf2, "All"),
+           list(synth3, conf3, "Mean"),
+           list(synth4, conf4, "Correlation"))
+
+df = data.frame(NULL)
+
+for (elem in pairs) {
+  # for each type of pairing, we need to evaluate both model types on cont and cat data
+  df = rbind(df, make_disc(elem[[1]], elem[[2]], lr_mod, "lr", elem[[3]], "none"))
+  df = rbind(df, make_disc(elem[[1]], elem[[2]], tree_mod, "tree", elem[[3]], "cp"))
+  df = rbind(df, make_disc(elem[[1]], elem[[2]], lasso_mod, "lasso", elem[[3]], "penalty"))
+  df = rbind(df, make_disc(elem[[1]], elem[[2]], rf_mod, "rf", elem[[3]], "none"))
+}
+
+colnames(df) = c("pmse_train", "specks_train", "auc_train", "pmse_test", "specks_test", "auc_test", "type", "name")
+
+# indicates control (synthetic and confidential data from same distribution), errors with both mean and variance, 
+# errors with correlations, and errors with means
+level_order <- c("Control", "All", "Correlation", "Mean") 
+group_colors <- c(lr ="#361052", tree = "green", lasso = "red", rf = "blue")
+```
+
+```{r}
+fig_a = ggplot(df, aes(x = factor(name, level = level_order), 
+                       group = type, 
+                       color = type, 
+                       y = as.numeric(specks_train)))+
+  geom_jitter(width = .03, size = 4)+
+  ylab("SPECKS Value")+
+  xlab("")+
+  ggtitle("SPECKS")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()
+
+fig_b = ggplot(df, aes(x = factor(name, level = level_order), group = type, 
+                       color = type, y = as.numeric(pmse_train)))+
+  geom_jitter(width = .03, size = 4)+
+  ylab("pMSE Value")+
+  xlab("")+
+  ggtitle("pMSE")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()
+
+fig_c = ggplot(df, aes(x = factor(name, level = level_order), group = type, 
+                       color = type, y = as.numeric(auc_train)))+
+  geom_jitter(width = .03, size = 4)+
+  ylab("AUC Value")+
+  xlab("")+
+  ggtitle("AUC")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()
+
+ggarrange(fig_a + scale_x_discrete(guide = guide_axis(n.dodge = 2)), 
+          fig_b + scale_x_discrete(guide = guide_axis(n.dodge = 2)),
+          fig_c + scale_x_discrete(guide = guide_axis(n.dodge = 2)))
+```
+
+
+```{r}
+fig_a = ggplot(df, aes(x = factor(name, level = level_order), 
+                       group = type, 
+                       color = type, 
+                       y = as.numeric(specks_test)))+
+  geom_jitter(width = .03, size = 4)+
+  ylab("SPECKS Value")+
+  xlab("")+
+  ggtitle("SPECKS")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()
+
+fig_b = ggplot(df, aes(x = factor(name, level = level_order), group = type, 
+                       color = type, y = as.numeric(pmse_test)))+
+  geom_jitter(width = .03, size = 4)+
+  ylab("pMSE Value")+
+  xlab("")+
+  ggtitle("pMSE")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()
+
+fig_c = ggplot(df, aes(x = factor(name, level = level_order), group = type, 
+                       color = type, y = as.numeric(auc_test)))+
+  geom_jitter(width = .03, size = 4)+
+  ylab("AUC Value")+
+  xlab("")+
+  ggtitle("AUC")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()
+
+ggarrange(fig_a + scale_x_discrete(guide = guide_axis(n.dodge = 2)), 
+          fig_b + scale_x_discrete(guide = guide_axis(n.dodge = 2)),
+          fig_c + scale_x_discrete(guide = guide_axis(n.dodge = 2)))
+```
+
+Majority/minority split and discriminant-based metric calculation
+Sample 10% of data from each bad synthetic dataset, 90% from the same distribution as confidential dataset
+```{r}
+# Same distribution
+vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+means = rep(0,p) # mean vector
+conf1 = as_tibble(mvrnorm(means, vcov, n = n), n = p)
+synth1 = generate_postsynth(as_tibble(mvrnorm(means, vcov, n = n), n=p))
+
+# larger variances, slightly off means
+vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+means = rep(0,p) # mean vector
+conf2 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+means_new = means
+means_new = sample(c(-.2,.2), 10, replace = T) # mean vector
+vcov_new = vcov
+vcov_new = matrix(2*corr, p, p) + diag(4-2*corr, p, p) # vcov matrix, p on all off-diagonal variables
+synth2 = generate_postsynth(rbind(sample_n(as_tibble(mvrnorm(means_new, vcov_new, n = n), n=p), size=n/10, replace = FALSE),
+            as_tibble(mvrnorm(means, vcov, n = 9*n/10), n=p)))
+
+# one variable centered at wrong value
+vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+means = rep(0,p) # mean vector
+conf3 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+means_new = means
+means_new[1] = 2
+synth3 = generate_postsynth(rbind(sample_n(as_tibble(mvrnorm(means_new, vcov, n = n), n=p), size=n/10, replace = FALSE),
+            as_tibble(mvrnorm(means, vcov, n = 9*n/10), n=p)))
+
+# relationship reversed (between V1 and everything else)
+vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+means = rep(0,p) # mean vector
+conf4 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+vcov_new = vcov
+vcov_new[1,2:p] = -rep(corr, p-1)
+vcov_new[2:p,1] = -rep(corr, p-1)
+synth4 = generate_postsynth(rbind(sample_n(as_tibble(mvrnorm(means, vcov_new, n = n), n=p), size=n/10, replace = FALSE),
+            as_tibble(mvrnorm(means, vcov, n = 9*n/10), n=p)))
+
+```
+
+```{r}
+# iterate through all of the model pairs we've got
+pairs <- list(list(synth1, conf1, "Control"),
+           list(synth2, conf2, "All"),
+           list(synth3, conf3, "Mean"),
+           list(synth4, conf4, "Correlation"))
+
+df = data.frame(NULL)
+
+for (elem in pairs) {
+  # for each type of pairing, we need to evaluate both model types on cont and cat data
+  df = rbind(df, make_disc(elem[[1]], elem[[2]], lr_mod, "lr", elem[[3]], "none"))
+  df = rbind(df, make_disc(elem[[1]], elem[[2]], tree_mod, "tree", elem[[3]], "cp"))
+  df = rbind(df, make_disc(elem[[1]], elem[[2]], lasso_mod, "lasso", elem[[3]], "penalty"))
+  df = rbind(df, make_disc(elem[[1]], elem[[2]], rf_mod, "rf", elem[[3]], "none"))
+}
+
+colnames(df) = c("pmse", "specks", "auc", "type", "name")
+
+# indicates control (synthetic and confidential data from same distribution), errors with both mean and variance, 
+# errors with correlations, and errors with means
+level_order <- c("Control", "All", "Correlation", "Mean") 
+group_colors <- c(lr ="#361052", tree = "green", lasso = "red", rf = "blue")
+```
+
+```{r}
+fig_a = ggplot(df, aes(x = factor(name, level = level_order), 
+                       group = type, 
+                       color = type, 
+                       y = as.numeric(specks)))+
+  geom_jitter(width = .03, size = 4)+
+  ylab("SPECKS Value")+
+  xlab("")+
+  ggtitle("SPECKS")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()
+
+fig_b = ggplot(df, aes(x = factor(name, level = level_order), group = type, 
+                       color = type, y = as.numeric(pmse)))+
+  geom_jitter(width = .03, size = 4)+
+  ylab("pMSE Value")+
+  xlab("")+
+  ggtitle("pMSE")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()
+
+fig_c = ggplot(df, aes(x = factor(name, level = level_order), group = type, 
+                       color = type, y = as.numeric(auc)))+
+  geom_jitter(width = .03, size = 4)+
+  ylab("AUC Value")+
+  xlab("")+
+  ggtitle("AUC")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()
+
+ggarrange(fig_a + scale_x_discrete(guide = guide_axis(n.dodge = 2)), 
+          fig_b + scale_x_discrete(guide = guide_axis(n.dodge = 2)),
+          fig_c + scale_x_discrete(guide = guide_axis(n.dodge = 2)))
+```

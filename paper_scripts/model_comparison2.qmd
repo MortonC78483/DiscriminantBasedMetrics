@@ -1,0 +1,321 @@
+---
+title: "model_comparison2"
+format: pdf
+---
+
+Run analyses for figure 1, 2, S1, S2 (model comparison figures).
+
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all('../../syntheval')
+library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+library(yardstick)
+
+set.seed(78483)
+```
+
+```{r}
+generate_postsynth <- function(data){
+  list(
+    synthetic_data = data,
+    jth_synthesis_time = data.frame(
+      variable = factor(colnames(data.frame(data)))
+    )
+  )  %>%
+  structure(class = "postsynth")
+}
+```
+
+```{r}
+generate_controls <- function(p, corr, n, prop = 1){
+  # Same distribution
+  vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+  means = rep(0,p) # mean vector
+  conf1 = as_tibble(mvrnorm(means, vcov, n = n), n = p)
+  synth1 = generate_postsynth(as_tibble(mvrnorm(means, vcov, n = n), n=p))
+  list(conf1, synth1)
+}
+
+generate_alloff <- function(p, corr, n, prop = 1){
+  # larger variances, slightly off means
+  vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+  means = rep(0,p) # mean vector
+  conf2 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+  means_new = means
+  means_new = sample(c(-.2,.2), 10, replace = T) # mean vector
+  vcov_new = vcov
+  vcov_new = matrix(2*corr, p, p) + diag(4-2*corr, p, p) # vcov matrix, p on all off-diagonal variables
+  if (prop != 1){
+    synth2 = generate_postsynth(rbind(sample_n(as_tibble(mvrnorm(means_new, vcov_new, n = n), n=p), size=n*prop, replace = FALSE),
+              as_tibble(mvrnorm(means, vcov, n = n*(1-prop)), n=p)))
+  } else{
+    synth2 = generate_postsynth(rbind(sample_n(as_tibble(mvrnorm(means_new, vcov_new, n = n), n=p), size=n*prop, replace = FALSE)))
+  }
+  
+  list(conf2, synth2)
+}
+
+generate_mean <- function(p, corr, n, prop = 1){
+  # one variable centered at wrong value
+  vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+  means = rep(0,p) # mean vector
+  conf3 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+  means_new = means
+  means_new[1] = 2
+  if (prop != 1){
+    synth3 = generate_postsynth(rbind(sample_n(as_tibble(mvrnorm(means_new, vcov, n = n), n=p), size=n*prop, replace = FALSE),
+              as_tibble(mvrnorm(means, vcov, n = n*(1-prop)), n=p)))
+  } else{
+    synth3 = generate_postsynth(rbind(sample_n(as_tibble(mvrnorm(means_new, vcov, n = n), n=p), size=n*prop, replace = FALSE)))
+  }
+  
+  list(conf3, synth3)
+}
+
+generate_var <- function(p, corr, n, prop = 1){
+  # relationship reversed (between V1 and everything else)
+  vcov = matrix(corr, p, p) + diag(1-corr, p, p) # vcov matrix, p on all off-diagonal variables
+  means = rep(0,p) # mean vector
+  conf4 = as_tibble(mvrnorm(means, vcov, n = n), n=p)
+  vcov_new = vcov
+  vcov_new[1,2:p] = -rep(corr, p-1)
+  vcov_new[2:p,1] = -rep(corr, p-1)
+  if (prop != 1){
+    synth4 = generate_postsynth(rbind(sample_n(as_tibble(mvrnorm(means, vcov_new, n = n), n=p), size=n*prop, replace = FALSE),
+              as_tibble(mvrnorm(means, vcov, n = n*(1-prop)), n=p)))
+  } else{
+    synth4 = generate_postsynth(rbind(sample_n(as_tibble(mvrnorm(means, vcov_new, n = n), n=p), size=n*prop, replace = FALSE)))
+  }
+  
+  list(conf4, synth4)
+}
+```
+
+```{r}
+# create models
+tree_mod <- decision_tree(cost_complexity = tune()) %>%
+  set_mode(mode = "classification") %>%
+  set_engine(engine = "rpart")
+
+lr_mod <- logistic_reg(engine = "glm") %>%
+  set_mode(mode = "classification")
+
+lasso_mod <- logistic_reg(penalty = tune(), mixture = 1) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "glmnet")  
+
+rf_mod <- rand_forest(
+    mode = "classification",
+    engine = "randomForest",
+    mtry = NULL,
+    trees = NULL,
+    min_n = NULL
+)
+```
+
+```{r}
+# function to return the discriminator object with propensity scores for synthetic and confidential data
+# and a model
+# provide synthetic data, confidential data, model, name of model used (type), name of data (name), and parameter to tune, if any
+make_disc <- function(synth, conf, mod, type, name, param = "none", return = "Standard") {
+  rpart_rec <- recipe(.source_label ~ ., data = discrimination(synth, conf)$combined_data)
+  
+  if (type == "lr"){
+    rpart_rec <- rpart_rec %>%
+        step_poly(all_numeric_predictors(), degree = 2) %>%
+        step_normalize(all_predictors())
+  }
+  if (param == "none"){
+    # set up discriminator
+    d <- discrimination(synth, conf) %>%
+      add_propensities(
+        recipe = rpart_rec,
+        spec = mod
+      ) %>%
+      add_discriminator_auc() %>%
+      add_specks() %>%
+      add_pmse()
+  }
+  else{
+    if (param == "penalty"){ # lasso model
+      rec = rpart_rec %>%
+        step_poly(all_numeric_predictors(), degree = 2) %>%
+        step_normalize(all_predictors())
+      grid = grid_regular(penalty(), levels = 10)
+    }
+    else if (param == "cp"){ # tree model
+      rec = rpart_rec 
+      grid = grid_regular(cost_complexity(), levels= 10)
+    }
+    # set up discriminator
+    d <- discrimination(synth, conf) %>%
+      add_propensities_tuned(
+        grid = grid, 
+        recipe = rec,
+        spec = mod
+      ) %>%
+      add_discriminator_auc() %>%
+      add_specks() %>%
+      add_pmse()
+  }
+  if (return == "Standard"){
+    # extract the metrics
+    return(c(d$pmse$.pmse[1], d$specks$.specks[1], d$discriminator_auc$.estimate[1], #train
+      d$pmse$.pmse[2], d$specks$.specks[2], d$discriminator_auc$.estimate[2], #test
+      type, name))
+  } else{
+    return(d)
+  }
+}
+```
+
+```{r}
+n=10000 # number of samples
+corr=.7 # correlation
+p = 10 # number of variables
+times = 10
+props = 1
+df = data.frame(NULL)
+
+for (time in 1:times){
+  controls = generate_controls(p, corr, n)
+  conf1 = controls[[1]]
+  synth1 = controls[[2]]
+  alloff = generate_alloff(p, corr, n)
+  conf2 = alloff[[1]]
+  synth2 = alloff[[2]]
+  mean = generate_mean(p, corr, n)
+  conf3 = mean[[1]]
+  synth3 = mean[[2]]
+  var = generate_var(p, corr, n)
+  conf4 = var[[1]]
+  synth4 = var[[2]]
+  
+  # iterate through all of the model pairs we've got
+  pairs <- list(list(synth1, conf1, "Control"),
+             list(synth2, conf2, "All"),
+             list(synth3, conf3, "Mean"),
+             list(synth4, conf4, "Correlation"))
+  
+  for (elem in pairs) {
+    # for each type of pairing, we need to evaluate both model types on cont and cat data
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], lr_mod, "lr", elem[[3]], "none"))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], tree_mod, "tree", elem[[3]], "cp"))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], lasso_mod, "lasso", elem[[3]], "penalty"))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], rf_mod, "rf", elem[[3]], "none"))
+  }
+}
+  
+colnames(df) = c("pmse_train", "specks_train", "auc_train", "pmse_test", "specks_test", "auc_test", "type", "name")
+```
+
+Write to csv
+```{r}
+write.csv(df, "fig1_v2.csv")
+```
+
+
+Majority/minority split and discriminant-based metric calculation
+Sample 10% of data from each bad synthetic dataset, 90% from the same distribution as confidential dataset
+
+```{r}
+n=10000 # number of samples
+corr=.7 # correlation
+p = 10 # number of variables
+times = 10
+prop = .1
+df = data.frame(NULL)
+
+for (time in 1:times){
+  controls = generate_controls(p, corr, n, prop = prop)
+  conf1 = controls[[1]]
+  synth1 = controls[[2]]
+  alloff = generate_alloff(p, corr, n, prop = prop)
+  conf2 = alloff[[1]]
+  synth2 = alloff[[2]]
+  mean = generate_mean(p, corr, n, prop = prop)
+  conf3 = mean[[1]]
+  synth3 = mean[[2]]
+  var = generate_var(p, corr, n, prop = prop)
+  conf4 = var[[1]]
+  synth4 = var[[2]]
+  
+  # iterate through all of the model pairs we've got
+  pairs <- list(list(synth1, conf1, "Control"),
+             list(synth2, conf2, "All"),
+             list(synth3, conf3, "Mean"),
+             list(synth4, conf4, "Correlation"))
+  
+  for (elem in pairs) {
+    # for each type of pairing, we need to evaluate both model types on cont and cat data
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], lr_mod, "lr", elem[[3]], "none"))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], tree_mod, "tree", elem[[3]], "cp"))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], lasso_mod, "lasso", elem[[3]], "penalty"))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], rf_mod, "rf", elem[[3]], "none"))
+  }
+}
+  
+colnames(df) = c("pmse_train", "specks_train", "auc_train", "pmse_test", "specks_test", "auc_test", "type", "name")
+  
+# indicates control (synthetic and confidential data from same distribution), errors with both mean and variance, 
+# errors with correlations, and errors with means
+level_order <- c("Control", "All", "Correlation", "Mean") 
+group_colors <- c(lr ="#361052", tree = "green", lasso = "red", rf = "blue")
+```
+
+Write to csv
+```{r}
+write.csv(df, "fig2_v2.csv")
+```
+
+
+Trying to figure out what is going on with the control case for pMSE for the 10% dataset manipulation, where the train and test are both super high (.1).
+
+```{r}
+controls = generate_controls(p, corr, n, prop = prop)
+conf1 = controls[[1]]
+synth1 = controls[[2]]
+
+disc = make_disc(synth1, conf1, tree_mod, "tree", "Control", "cp", return = "disc")
+disc
+#disc$discriminator[[2]]$fit$fit$spec
+#  depth()
+```
+
+I want to test whether we just trained a model that is confident but wrong.
+```{r}
+test_data = disc$propensities %>%
+  filter(.sample == "testing") %>%
+  dplyr::select(c(.pred_synthetic, .source_label)) %>%
+  mutate(pred = ifelse(.pred_synthetic>0.5, "synthetic", "original"))
+
+sum(test_data$.source_label == test_data$pred)/nrow(test_data)
+
+sum((test_data$.pred_synthetic-.5)^2)/nrow(test_data)
+```
+
+
+
+
+
+
+
+
+
+
+
+
