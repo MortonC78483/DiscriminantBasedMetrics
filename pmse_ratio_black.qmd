@@ -1,0 +1,160 @@
+---
+title: "pmse_ratio_black"
+format:
+  html:
+    theme: default
+---
+
+This script will implement the two-model approach for the pMSE ratio discriminant-based metric.
+For each element of the denominator of the pMSE ratio for the larger group, it will take a sample of size n (where n is the size of the smaller group) and then bootstrap this sample, taking a different initial sample each time. This will (according to the proof) create something with the same expected value under the null distribution as the minority group, allowing me to compare the 2-model approach's pMSE ratios.
+
+I will code up the pMSE ratio function by group once I've gotten this version to work. For now, I'm doing it in a bit of a weird way.
+
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all("../../syntheval")
+#library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+source("../add_pmse_ratio_size.R")
+set.seed(1)
+```
+
+Load in data
+```{r}
+process_data <- function(df){
+  df <- as.data.frame(unclass(df),stringsAsFactors=TRUE)
+  df$pov <- as.factor(df$pov)
+  df$BLACK <- as.factor(df$BLACK)
+  order = c("pov", "EMPSTAT", "EDUC", "BLACK", "SEX", "HCOVANY", "VETSTAT", "FTOTINC", "AGE")
+  df <- df %>%
+    dplyr::select(order)
+  df
+}
+```
+
+```{r}
+data_mi <- read_csv("../data/data_mi.csv")
+data_mi <- process_data(data_mi)
+
+synth_good <- read_csv("../data/good_synth_pov.csv")
+synth_good <- process_data(synth_good)
+
+#synth_med <- read_csv("../data/med_synth_pov.csv")
+synth_med <- read_csv("../data/synth_pov_75.csv")
+synth_med <- process_data(synth_med)
+
+synth_bad <- read_csv("../data/bad_synth_pov.csv")
+synth_bad <- process_data(synth_bad)
+```
+
+```{r}
+calc_disc <- function(discriminator){
+  # Evaluate discriminant-based metrics on the data using tree-based model
+  tree_mod <- decision_tree(cost_complexity = tune()) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "rpart")
+  
+  rpart_rec <- recipe(.source_label ~ ., data = discriminator$combined_data)
+  
+  grid = grid_regular(cost_complexity(), levels= 10)
+  
+  # set up discriminator
+  d <- discriminator %>%
+    add_propensities_tuned(
+      grid = grid, 
+      recipe = rpart_rec,
+      spec = tree_mod
+    )
+  d
+}
+```
+
+Evaluate pMSE ratio with size change in denominator of majority group
+```{r}
+disc_good = discrimination(synth_good, data_mi)
+res_good = calc_disc(disc_good)
+
+disc_med = discrimination(synth_med, data_mi)
+res_med = calc_disc(disc_med)
+
+disc_bad = discrimination(synth_bad, data_mi)
+res_bad = calc_disc(disc_bad)
+```
+
+```{r}
+corrected_pmse_ratio <- function(synth, times, minority_size){
+  # create no poverty sub-dataset
+  conf_nopov <- data_mi %>%
+    filter(pov == 0)
+  synth_nopov <- synth %>%
+    filter(pov == 0)
+  disc_nopov <- discrimination(synth_nopov, conf_nopov)
+  
+  # fit model wtih pmse to our no poverty sub-dataset
+  res_nopov <- calc_disc(disc_nopov)
+  # fit pmse ratio using size of minority group
+  res_nopov <- res_nopov %>%
+    add_pmse() %>%
+    add_pmse_ratio_scaled(size = minority_size, times = times)
+  
+  # create poverty sub-dataset
+  conf_pov <- data_mi %>%
+    filter(pov == 1)
+  synth_pov <- synth %>%
+    filter(pov == 1)
+  disc_pov <- discrimination(synth_pov, conf_pov)
+  
+  # fit model wtih pmse to our no poverty sub-dataset
+  res_pov <- calc_disc(disc_pov)
+  
+  # fit pmse ratio using size of minority group
+  res_pov <- res_pov %>%
+    add_pmse() %>%
+    add_pmse_ratio_scaled(size = minority_size, times = times)
+  
+  return(c(res_nopov$pmse$.pmse_ratio[2], res_pov$pmse$.pmse_ratio[2]))
+}
+```
+
+```{r}
+minority_size = sum(data_mi$pov == 1)
+times = 10
+
+pmse_ratio_good <- corrected_pmse_ratio(synth_good, times, minority_size)
+pmse_ratio_med <- corrected_pmse_ratio(synth_med, times, minority_size)
+pmse_ratio_bad <- corrected_pmse_ratio(synth_bad, times, minority_size)
+```
+
+Graph results
+```{r}
+pmse_ratios = c(pmse_ratio_good, pmse_ratio_med, pmse_ratio_bad)
+synth_type = c("good", "good", "med", "med", "bad", "bad")
+pov_class = c("nopov", "pov", "nopov", "pov", "nopov", "pov")
+synth_type = factor(synth_type, levels = c("bad", "med", "good"))
+
+plot <- data.frame(pmse = pmse_ratios, synth_type = synth_type, pov_class = pov_class)
+ggplot(plot, aes(x = synth_type, group = pov_class, y = pmse, color = pov_class))+
+  geom_point()+
+  ylab("pMSE Ratio")+
+  xlab("Synthesis Type")+
+  theme_classic()
+```
+
+
+
+
+
+
