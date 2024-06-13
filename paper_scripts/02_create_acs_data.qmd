@@ -1,0 +1,145 @@
+---
+title: "jan_update_2.1"
+format:
+  html:
+    self-contained: true
+    theme: default
+    code-fold: true
+    code-summary: "Show the code"
+    embed-resoures: true
+    toc: true
+---
+
+
+/*************************/
+Programmer: Claire Morton
+Date created: 01/18/2024
+Date of last revision: 06/12/2024
+original data: Pulls ACS from a data extract
+
+Description: This script pulls and cleans the ACS data used in the case study, to create "data/data_mi.csv"
+
+(1) Pull data from ACS
+(2) Clean data
+(3) Save data to "data/data_mi.csv"
+/*************************/
+
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all('../../syntheval')
+library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+
+set.seed(78483)
+```
+
+(1) extract dataset (will need to set API key)
+```{r}
+# create a new extract object
+extract_definition <- define_extract_usa(
+  description = "Extract",
+  samples = "us2022a",
+  variables = c("AGE", "SEX", "RACE", "STATEFIP", "EMPSTAT", "HCOVANY",
+                "EDUC", "VETSTAT", "FTOTINC", "POVERTY")
+)
+
+set_ipums_api_key("SET KEY HERE")
+
+# submit the extract to IPUMS USA for processing
+submitted_extract <- submit_extract(extract_definition)
+
+# access the extract number, stored in the return value of submit_extract
+submitted_extract$number
+
+wait_for_extract(submitted_extract)
+
+# This will save the extract files to the current directory
+# use the download_dir argument to specify a different location
+# The return value is the path to the DDI codebook file, which can then be passed to read_ipums_micro to read the data
+path_to_ddi_file <- download_extract(submitted_extract, download_dir = "data")
+```
+
+(2) clean dataset 
+```{r}
+# pull dataset
+#data <- read_ipums_micro(path_to_ddi_file)
+data <- read_ipums_micro("data/usa_00004.xml")
+data <- data |>
+  mutate(across(where(is.labelled), ~as_factor(lbl_clean(.x))))
+
+# select Michigan
+states <- c("Michigan")
+vars <- c("STATEFIP", "PERNUM", "SEX", "AGE", "RACE", 
+           "HCOVANY", "EDUC", "EMPSTAT", "FTOTINC", "POVERTY",
+           "VETSTAT")
+
+data_mi <- data %>%
+  dplyr::select(all_of(vars)) %>%
+  filter(STATEFIP %in% states,
+         PERNUM == 1) 
+
+# recode factor variables (vetstat, sex, race, healthcare coverage, employment status didn't need recoding)
+data_mi$EDUC <- recode(data_mi$EDUC, 
+               "N/A or no schooling" = "N/A",
+               "Nursery school to grade 4" = "Less than high school",
+               "Grade 5, 6, 7, or 8" = "Less than high school",
+               "Grade 9" = "Some high school",
+               "Grade 10" = "Some high school",
+               "Grade 11" = "Some high school",
+               "Grade 12" = "High school",
+               "1 year of college" = "Some college",
+               "2 years of college" = "Some college",
+               "4 years of college" = "4+ years of college",
+               "5+ years of college" = "4+ years of college")
+
+# recode numeric variables (age, poverty (as % of poverty threshold), and income)
+data_mi$AGE <- as.numeric(as.character(recode(data_mi$AGE, 
+                      "Less than 1 year old"= "0",
+                      "90 (90+ in 1980 and 1990)" = "90")))
+data_mi$FTOTINC <- as.numeric(as.character(recode(data_mi$FTOTINC,
+                                     "No income (1950-2000, ACS/PRCS) " = "0")))
+data_mi$POVERTY <- as.numeric(as.character(recode(data_mi$POVERTY,
+                                     "501 percent or more of poverty threshold" = "500",
+                                     "1 percent or less of poverty threshold (including 0 or negative income)" = "0")))
+
+# set character NAs to be NA
+data_mi[data_mi == "N/A"]<-NA 
+
+# create poverty indicator
+data_mi$pov <- ifelse(data_mi$POVERTY < 100, 1, 0)
+
+# restrict to Black/white individuals only
+data_mi <- data_mi %>%
+  filter(RACE %in% c("White", "Black/African American"))
+
+# create Black indicator
+data_mi$black <- ifelse(data_mi$RACE == "Black/African American", 1, 0) # to be used as majority/minority indicator in subsequent analysis
+
+# complete case analysis of adults only
+data_mi <- data_mi %>%
+  filter(AGE >= 19,
+         complete.cases(.)) %>%
+  dplyr::select(-c("STATEFIP", "PERNUM", "POVERTY", "RACE"))
+
+# get rid of unused NA levels in factors (educ, empstat, vetstat)
+data_mi = droplevels(data_mi)
+```
+
+(3) save dataset
+```{r}
+# save the file
+write_csv(data_mi, "data/data_mi.csv")
+```

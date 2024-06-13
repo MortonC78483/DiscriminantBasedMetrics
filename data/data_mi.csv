@@ -1,4 +1,4 @@
-SEX,AGE,HCOVANY,EDUC,EMPSTAT,FTOTINC,VETSTAT,pov,BLACK
+SEX,AGE,HCOVANY,EDUC,EMPSTAT,FTOTINC,VETSTAT,pov,black
 Female,74,With health insurance coverage,High school,Not in labor force,0,Not a veteran,1,0
 Female,42,With health insurance coverage,High school,Employed,21200,Not a veteran,0,0
 Female,53,With health insurance coverage,High school,Employed,83000,Not a veteran,0,0

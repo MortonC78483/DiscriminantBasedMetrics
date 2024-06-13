@@ -1,0 +1,99 @@
+---
+title: "pmse_ratio_black"
+format:
+  html:
+    theme: default
+---
+
+/*************************/
+Programmer: Claire Morton
+Date created: 06/12/2024
+Date of last revision: 06/12/2024
+original data: Pulls the processed ACS dataset, data_mi.csv
+
+Description: This script will implement the two-model approach for the pMSE-ratio discriminant-based metric. For each element of the denominator of the pMSE-ratio for the larger group, it will take a sample of size n (where n is the size of the smaller group) and then bootstrap this sample, taking a different initial sample each time. The script outputs a csv "data/pmse_ratio_race.csv", containing the modified group-wise pMSE-ratios.
+
+/*************************/
+
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all("../../syntheval")
+#library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+source('00_functions.R')
+source('add_pmse_ratio_scaled.R')
+set.seed(78483)
+```
+
+
+```{r}
+# load data
+data_mi <- read_csv("data/data_mi.csv")
+data_mi <- as.data.frame(unclass(data_mi),stringsAsFactors=TRUE)
+data_mi$pov <- as.factor(data_mi$pov)
+data_mi$black <- as.factor(data_mi$black)
+
+n_ratios = 1
+df_race <- data.frame(matrix(ncol = 3, nrow = 0))
+colnames(df_race) <- c("pmse", "synth_type", "BLACK_class")
+```
+
+```{r}
+# loop and calculate pMSE ratio for all 5 types of syntheses
+for(i in 1:n_ratios){
+  synth_list = make_all_synth_datasets(data_mi, "race")
+  synth_black_good = synth_list[[1]]$synthetic_data
+  synth_black_good <- process_data(synth_black_good, "race")
+  
+  synth_black_med = synth_list[[2]]$synthetic_data
+  synth_black_med <- process_data(synth_black_med, "race")
+    
+  synth_black_bad = synth_list[[3]]$synthetic_data
+  synth_black_bad <- process_data(synth_black_bad, "race")
+  
+  synth_noblack_med = synth_list[[4]]$synthetic_data
+  synth_noblack_med <- process_data(synth_noblack_med, "race")
+  
+  synth_noblack_bad = synth_list[[5]]$synthetic_data
+  synth_noblack_bad <- process_data(synth_noblack_bad, "race")
+  
+  minority_size = sum(data_mi$black == 1)
+  times = 10
+  
+  pmse_ratio_good <- corrected_pmse_ratio(synth_black_good, data_mi, calc_disc, times, minority_size, "race")
+  pmse_ratio_black_med <- corrected_pmse_ratio(synth_black_med, data_mi, calc_disc, times, minority_size, "race")
+  pmse_ratio_black_bad <- corrected_pmse_ratio(synth_black_bad, data_mi, calc_disc, times, minority_size, "race")
+  pmse_ratio_noblack_med <- corrected_pmse_ratio(synth_noblack_med, data_mi, calc_disc, times, minority_size, "race")
+  pmse_ratio_noblack_bad <- corrected_pmse_ratio(synth_noblack_bad, data_mi, calc_disc, times, minority_size, "race")
+  
+  pmse_ratios = c(c(pmse_ratio_noblack_bad[[1]], pmse_ratio_noblack_bad[[2]]),
+                c(pmse_ratio_noblack_med[[1]], pmse_ratio_noblack_med[[2]]),
+                c(pmse_ratio_good[[1]], pmse_ratio_good[[2]]), 
+                c(pmse_ratio_black_med[[1]], pmse_ratio_black_med[[2]]),
+                c(pmse_ratio_black_bad[[1]], pmse_ratio_black_bad[[2]]))
+                
+  synth_type = c("noblack_bad", "noblack_bad", "noblack_med", "noblack_med", "good", "good", "black_med", "black_med", "black_bad", "black_bad")
+  black_class = c("noblack", "black", "noblack", "black", "noblack", "black", "noblack", "black", "noblack", "black")
+  synth_type = factor(synth_type, levels = c("noblack_bad", "noblack_med", "good", "black_med", "black_bad"))
+  
+  plot <- data.frame(pmse = pmse_ratios, synth_type = synth_type, black_class = black_class)
+  df_race <- rbind(df_race, plot)
+}
+```
+
+```{r}
+write_csv(df_race, "data/pmse_ratio_race.csv")
+```
