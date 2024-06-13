@@ -1,0 +1,201 @@
+---
+title: "model_comparison_plots"
+format: pdf
+---
+
+DEPRECATED
+Make plots using csv files from model_comparison2.qmd
+
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all('../../syntheval')
+library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+
+set.seed(78483)
+```
+
+```{r}
+# indicates control (synthetic and confidential data from same distribution), errors with both mean and variance, 
+# errors with correlations, and errors with means
+df <- read.csv("fig1_v2.csv")
+level_order <- c("Control", "All", "Correlation", "Mean") 
+group_colors <- c(lr ="#361052", tree = "green", lasso = "red", rf = "blue")
+```
+
+```{r}
+fig_a = ggplot(df, aes(x = "", 
+                       group = type, 
+                       color = type, 
+                       y = as.numeric(specks_train)))+
+  geom_boxplot()+
+  ylab("SPECKS Value")+
+  xlab("")+
+  ggtitle("SPECKS")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()+
+  facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+
+fig_b = ggplot(df, aes(x = "", group = type, 
+                       color = type, y = as.numeric(pmse_train)))+
+  geom_boxplot()+
+  ylab("pMSE Value")+
+  xlab("")+
+  ggtitle("pMSE")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()+
+  facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+
+fig_c = ggplot(df, aes(x = "", group = type, 
+                       color = type, y = as.numeric(auc_train)))+
+  geom_boxplot()+
+  ylab("AUC Value")+
+  xlab("")+
+  ggtitle("AUC")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()+
+  facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+
+ggarrange(fig_a + scale_x_discrete(guide = guide_axis(n.dodge = 2)), 
+          fig_b + scale_x_discrete(guide = guide_axis(n.dodge = 2)),
+          fig_c + scale_x_discrete(guide = guide_axis(n.dodge = 2)), ncol =1)
+```
+
+```{r}
+fig_a = ggplot(df, aes(x = "", 
+                       group = type, 
+                       color = type, 
+                       y = as.numeric(specks_test)))+
+  geom_boxplot()+
+  ylab("SPECKS Value")+
+  xlab("")+
+  ggtitle("SPECKS")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()+
+  facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+
+fig_b = ggplot(df, aes(x = "", group = type, 
+                       color = type, y = as.numeric(pmse_test)))+
+  geom_boxplot()+
+  ylab("pMSE Value")+
+  xlab("")+
+  ggtitle("pMSE")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()+
+  facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+
+fig_c = ggplot(df, aes(x = "", group = type, 
+                       color = type, y = as.numeric(auc_test)))+
+  geom_boxplot()+
+  ylab("AUC Value")+
+  xlab("")+
+  ggtitle("AUC")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()+
+  facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+
+ggarrange(fig_a + scale_x_discrete(guide = guide_axis(n.dodge = 2)), 
+          fig_b + scale_x_discrete(guide = guide_axis(n.dodge = 2)),
+          fig_c + scale_x_discrete(guide = guide_axis(n.dodge = 2)), ncol =1)
+```
+
+```{r}
+df <- read.csv("fig2_v2.csv")
+```
+
+```{r}
+hist(df$pmse_train)
+max(df$pmse_train)
+```
+
+```{r}
+fig_a = ggplot(df, aes(x = "", 
+                       group = type, 
+                       color = type, 
+                       y = as.numeric(specks_train)))+
+  geom_boxplot()+
+  ylab("SPECKS Value")+
+  xlab("")+
+  ggtitle("SPECKS")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()+
+  facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+
+fig_b = ggplot(df, aes(x = "", group = type, 
+                       color = type, y = as.numeric(pmse_train)))+
+  geom_boxplot()+
+  ylab("pMSE Value")+
+  xlab("")+
+  ggtitle("pMSE")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()+
+  facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+
+fig_c = ggplot(df, aes(x = "", group = type, 
+                       color = type, y = as.numeric(auc_train)))+
+  geom_boxplot()+
+  ylab("AUC Value")+
+  xlab("")+
+  ggtitle("AUC")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()+
+  facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+
+ggarrange(fig_a + scale_x_discrete(guide = guide_axis(n.dodge = 2)), 
+          fig_b + scale_x_discrete(guide = guide_axis(n.dodge = 2)),
+          fig_c + scale_x_discrete(guide = guide_axis(n.dodge = 2)), ncol =1)
+```
+
+
+```{r}
+fig_a = ggplot(df, aes(x = "", 
+                       group = type, 
+                       color = type, 
+                       y = as.numeric(specks_test)))+
+  geom_boxplot()+
+  ylab("SPECKS Value")+
+  xlab("")+
+  ggtitle("SPECKS")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()+
+  facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+
+fig_b = ggplot(df, aes(x = "", group = type, 
+                       color = type, y = as.numeric(pmse_test)))+
+  geom_boxplot()+
+  ylab("pMSE Value")+
+  xlab("")+
+  ggtitle("pMSE")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()+
+  facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+
+fig_c = ggplot(df, aes(x = "", group = type, 
+                       color = type, y = as.numeric(auc_test)))+
+  geom_boxplot()+
+  ylab("AUC Value")+
+  xlab("")+
+  ggtitle("AUC")+
+  scale_color_manual(values=group_colors)+
+  theme_classic()+
+  facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+
+ggarrange(fig_a + scale_x_discrete(guide = guide_axis(n.dodge = 2)), 
+          fig_b + scale_x_discrete(guide = guide_axis(n.dodge = 2)),
+          fig_c + scale_x_discrete(guide = guide_axis(n.dodge = 2)), ncol =1)
+```
+
+
