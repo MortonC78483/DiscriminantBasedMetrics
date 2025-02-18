@@ -8,7 +8,7 @@ format:
 /*************************/
 Programmer: Claire Morton
 Date created: 06/12/2024
-Date of last revision: 06/12/2024
+Date of last revision: 02/13/2025
 original data: Pulls the processed ACS dataset, data_mi.csv
 
 Description: This script will implement the two-model approach for the pMSE-ratio discriminant-based metric. For each element of the denominator of the pMSE-ratio for the larger group, it will take a sample of size n (where n is the size of the smaller group) and then bootstrap this sample, taking a different initial sample each time. The script outputs a csv "data/pmse_ratio_pov.csv", containing the modified group-wise pMSE-ratios.
@@ -46,7 +46,7 @@ data_mi <- as.data.frame(unclass(data_mi),stringsAsFactors=TRUE)
 data_mi$pov <- as.factor(data_mi$pov)
 data_mi$black <- as.factor(data_mi$black)
 
-n_ratios = 5
+n_ratios = 10
 df_pov <- data.frame(matrix(ncol = 3, nrow = 0))
 colnames(df_pov) <- c("pmse", "synth_type", "pov_class")
 ```
@@ -84,6 +84,87 @@ for(i in 1:n_ratios){
                 c(pmse_ratio_good[[1]], pmse_ratio_good[[2]]), 
                 c(pmse_ratio_pov_med[[1]], pmse_ratio_pov_med[[2]]),
                 c(pmse_ratio_pov_bad[[1]], pmse_ratio_pov_bad[[2]]))
+                
+  synth_type = c("nopov_bad", "nopov_bad", "nopov_med", "nopov_med", "good", "good", "pov_med", "pov_med", "pov_bad", "pov_bad")
+  pov_class = c("nopov", "pov", "nopov", "pov", "nopov", "pov", "nopov", "pov", "nopov", "pov")
+  synth_type = factor(synth_type, levels = c("nopov_bad", "nopov_med", "good", "pov_med", "pov_bad"))
+  
+  plot <- data.frame(pmse = pmse_ratios, synth_type = synth_type, pov_class = pov_class)
+  df_pov <- rbind(df_pov, plot)
+}
+```
+
+Save results
+```{r}
+write_csv(df_pov, "data/pmse_ratio_adjusted_pov.csv")
+```
+
+
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all("../../syntheval")
+#library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+source('00_functions.R')
+source('add_pmse_ratio_scaled.R')
+set.seed(78485)
+```
+
+```{r}
+# load data
+data_mi <- read_csv("data/data_mi.csv")
+data_mi <- as.data.frame(unclass(data_mi),stringsAsFactors=TRUE)
+data_mi$pov <- as.factor(data_mi$pov)
+data_mi$black <- as.factor(data_mi$black)
+
+n_ratios = 5
+df_pov <- data.frame(matrix(ncol = 3, nrow = 0))
+colnames(df_pov) <- c("pmse", "synth_type", "pov_class")
+```
+
+```{r}
+# loop and calculate pMSE ratio for all 5 types of syntheses
+for(i in 1:n_ratios){
+  synth_list = make_all_synth_datasets(data_mi, "pov")
+  synth_pov_good = synth_list[[1]]$synthetic_data
+  synth_pov_good <- process_data(synth_pov_good, "pov")
+  
+  synth_pov_med = synth_list[[2]]$synthetic_data
+  synth_pov_med <- process_data(synth_pov_med, "pov")
+    
+  synth_pov_bad = synth_list[[3]]$synthetic_data
+  synth_pov_bad <- process_data(synth_pov_bad, "pov")
+  
+  synth_nopov_med = synth_list[[4]]$synthetic_data
+  synth_nopov_med <- process_data(synth_nopov_med, "pov")
+  
+  synth_nopov_bad = synth_list[[5]]$synthetic_data
+  synth_nopov_bad <- process_data(synth_nopov_bad, "pov")
+  
+  minority_size = sum(data_mi$pov == 1)
+  times = 10
+  
+  pmse_ratio_good <- pmse_ratio(synth_pov_good, data_mi, calc_disc, times, "pov")
+  pmse_ratio_pov_med <- pmse_ratio(synth_pov_med, data_mi, calc_disc, times, "pov")
+  pmse_ratio_pov_bad <- pmse_ratio(synth_pov_bad, data_mi, calc_disc, times, "pov")
+  pmse_ratio_nopov_med <- pmse_ratio(synth_nopov_med, data_mi, calc_disc, times, "pov")
+  pmse_ratio_nopov_bad <- pmse_ratio(synth_nopov_bad, data_mi, calc_disc, times, "pov")
+  
+  pmse_ratios = c(pmse_ratio_nopov_bad, pmse_ratio_nopov_med, pmse_ratio_good, 
+                  pmse_ratio_pov_med, pmse_ratio_pov_bad)
                 
   synth_type = c("nopov_bad", "nopov_bad", "nopov_med", "nopov_med", "good", "good", "pov_med", "pov_med", "pov_bad", "pov_bad")
   pov_class = c("nopov", "pov", "nopov", "pov", "nopov", "pov", "nopov", "pov", "nopov", "pov")

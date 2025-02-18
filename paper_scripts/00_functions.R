@@ -144,7 +144,8 @@ make_disc <- function(synth, conf, mod, type, name, param = "none", return = "St
       ) %>%
       add_discriminator_auc() %>%
       add_specks() %>%
-      add_pmse()
+      add_pmse() %>%
+      add_pmse_ratio(times = 25)
   }
   else{ # we are tuning
     if (param == "penalty"){ # lasso model
@@ -166,12 +167,13 @@ make_disc <- function(synth, conf, mod, type, name, param = "none", return = "St
       ) %>%
       add_discriminator_auc() %>%
       add_specks() %>%
-      add_pmse()
+      add_pmse() %>%
+      add_pmse_ratio(times = 25)
   }
   if (return == "Standard"){
     # extract the metrics
-    return(c(d$pmse$.pmse[1], d$specks$.specks[1], d$discriminator_auc$.estimate[1], #train
-             d$pmse$.pmse[2], d$specks$.specks[2], d$discriminator_auc$.estimate[2], #test
+    return(c(d$pmse$.pmse[1], d$specks$.specks[1], d$discriminator_auc$.estimate[1], d$pmse$.pmse_ratio[1],#train
+             d$pmse$.pmse[2], d$specks$.specks[2], d$discriminator_auc$.estimate[2], d$pmse$.pmse_ratio[2],#test
              type, name))
   } else{
     return(d)
@@ -644,5 +646,80 @@ corrected_pmse_ratio <- function(synth, data_mi, calc_disc, times, minority_size
   }
 }
 
-
+# function to fit the pMSE-ratio without the denominator correction. 
+#   synth: the synthetic dataset
+#   data_mi: the confidential dataset
+#   calc_disc: function used to calculate the discriminator
+#   times: the number of bootstrap samples to draw to contribute to the denominator
+pmse_ratio <- function(synth, data_mi, calc_disc, times, var){
+  if (var == "race"){
+    # create no black sub-dataset
+    conf_noblack <- data_mi %>%
+      filter(black == 0)
+    synth_noblack <- synth %>%
+      filter(black == 0)
+    disc_noblack <- discrimination(synth_noblack, conf_noblack)
+    
+    # fit model wtih pmse to our no black sub-dataset
+    res_noblack <- calc_disc(disc_noblack)
+    # fit pmse ratio using size of minority group
+    obj <- res_noblack %>%
+      add_pmse() %>%
+      add_pmse_ratio(times = times)
+    res_noblack <- obj$pmse$.pmse_ratio[2]
+    
+    # create black sub-dataset
+    conf_black <- data_mi %>%
+      filter(black == 1)
+    synth_black <- synth %>%
+      filter(black == 1)
+    disc_black <- discrimination(synth_black, conf_black)
+    
+    # fit model with pmse to our no black sub-dataset
+    res_black <- calc_disc(disc_black)
+    
+    # fit pmse ratio using size of minority group
+    obj <- res_black %>%
+      add_pmse() %>%
+      add_pmse_ratio(times = times)
+    res_black <- obj$pmse$.pmse_ratio[2]
+    
+    return(c(res_noblack, res_black))
+  } else if (var == "pov"){
+    # create no poverty sub-dataset
+    conf_nopov <- data_mi %>%
+      filter(pov == 0)
+    synth_nopov <- synth %>%
+      filter(pov == 0)
+    disc_nopov <- discrimination(synth_nopov, conf_nopov)
+    
+    # fit model wtih pmse to our no poverty sub-dataset
+    res_nopov <- calc_disc(disc_nopov)
+    # fit pmse ratio using size of minority group
+    obj <- res_nopov %>%
+      add_pmse() %>%
+      add_pmse_ratio(times = times)
+    res_nopov <- obj$pmse$.pmse_ratio[2]
+    
+    # create poverty sub-dataset
+    conf_pov <- data_mi %>%
+      filter(pov == 1)
+    synth_pov <- synth %>%
+      filter(pov == 1)
+    disc_pov <- discrimination(synth_pov, conf_pov)
+    
+    # fit model wtih pmse to our no poverty sub-dataset
+    res_pov <- calc_disc(disc_pov)
+    
+    # fit pmse ratio using size of minority group
+    obj <- res_pov %>%
+      add_pmse() %>%
+      add_pmse_ratio(times = times)
+    res_pov <- obj$pmse$.pmse_ratio[2]
+    
+    return(c(res_nopov, res_pov))
+  } else{
+    stop("var required to be one of 'race'', 'pov'")
+  }
+}
 

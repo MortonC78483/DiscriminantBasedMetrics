@@ -6,7 +6,7 @@ format: pdf
 /*************************/
 Programmer: Claire Morton
 Date created: 06/10/2024
-Date of last revision: 06/10/2024
+Date of last revision: 10/10/2024
 original data: Does not import any data
 
 Description: This script creates example pairs of synthetic and confidential data and runs a variety of models on them to demonstrate model strengths and weaknesses. It outputs "data/fig1_v2.csv," and "data/fig2_v2.csv," which are both used by later scripts. 
@@ -20,7 +20,7 @@ In this part of the project, we examine whether different models to calculate di
 
 /*************************/
 
-```{r}
+```{r setup}
 library(tidyverse)
 library(ipumsr)
 library(srvyr)
@@ -72,7 +72,7 @@ rf_mod <- rand_forest(
 n=10000 # number of samples
 corr=.7 # correlation
 p = 10 # number of variables
-times = 1 # number of replicates
+times = 10# number of replicates
 props = 1 # proportion of data to manipulate (for simulated synthetic datasets)
 df = data.frame(NULL)
 
@@ -92,9 +92,9 @@ for (time in 1:times){
   
   # iterate through all of the model pairs
   pairs <- list(list(synth1, conf1, "Control"),
-             list(synth2, conf2, "All"),
-             list(synth3, conf3, "Mean"),
-             list(synth4, conf4, "Correlation"))
+                list(synth2, conf2, "All"),
+                list(synth3, conf3, "Mean"),
+                list(synth4, conf4, "Correlation"))
   
   for (elem in pairs) {
     # for each type of pairing, evaluate model
@@ -103,9 +103,10 @@ for (time in 1:times){
     df = rbind(df, make_disc(elem[[1]], elem[[2]], lasso_mod, "lasso", elem[[3]], "penalty"))
     df = rbind(df, make_disc(elem[[1]], elem[[2]], rf_mod, "rf", elem[[3]], "none"))
   }
+  print(time)
 }
   
-colnames(df) = c("pmse_train", "specks_train", "auc_train", "pmse_test", "specks_test", "auc_test", "type", "name")
+colnames(df) = c("pmse_train", "specks_train", "auc_train", "pmse_ratio_train", "pmse_test", "specks_test", "auc_test", "pmse_ratio_test", "type", "name")
 ```
 
 Write to csv
@@ -121,7 +122,7 @@ Sample 10% of data from each bad synthetic dataset, 90% from the same distributi
 n=10000 # number of samples
 corr=.7 # correlation
 p = 10 # number of variables
-times = 1
+times = 10
 prop = .1
 df = data.frame(NULL)
 
@@ -154,8 +155,8 @@ for (time in 1:times){
   }
 }
   
-colnames(df) = c("pmse_train", "specks_train", "auc_train", "pmse_test", "specks_test", "auc_test", "type", "name")
-  
+colnames(df) = c("pmse_train", "specks_train", "auc_train", "pmse_ratio_train", "pmse_test", "specks_test", "auc_test", "pmse_ratio_test", "type", "name")
+
 # indicates control (synthetic and confidential data from same distribution), errors with both mean and variance, 
 # errors with correlations, and errors with means
 level_order <- c("Control", "All", "Correlation", "Mean") 

@@ -6,7 +6,7 @@ format: pdf
 /*************************/
 Programmer: Claire Morton
 Date created: 06/12/2024
-Date of last revision: 06/12/2024
+Date of last revision: 09/30/2024
 original data: Pulls the processed ACS dataset, data_mi.csv
 
 Description: This script synthesizes datasets of varying utilities along poverty lines and runs the single- and dual-model approaches to assess the utility of the input data
@@ -48,7 +48,7 @@ data_mi <- read_csv("data/data_mi.csv")
 data_mi <- as.data.frame(unclass(data_mi),stringsAsFactors=TRUE)
 data_mi$pov <- as.factor(data_mi$pov)
 data_mi$black <- as.factor(data_mi$black)
-times = 1
+times = 10
 ```
 
 ```{r}
@@ -93,6 +93,8 @@ for (time in 1:times){
   list_dfs <- get_nums(synth_nopov_bad, data_mi, calc_disc, "nopov_bad", "pov")
   one_model_df <- rbind(one_model_df, list_dfs[[1]])
   two_model_df <- rbind(two_model_df, list_dfs[[2]])
+  
+  print(time)
 }
 ```
 

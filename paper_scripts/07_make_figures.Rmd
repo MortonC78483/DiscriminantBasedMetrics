@@ -24,115 +24,44 @@ library(caret)
 library(gt)
 library(ggpubr)
 library(patchwork)
+library(wesanderson)
 
 set.seed(78483)
 ```
 
-## Functions for Figure 1, 2, S1, S2
+## Function for Figure 1, 2, S1, S2
 ```{r fig12s1s2_funcs}
-make_specks_fig <- function(df, level_order, group_colors, type){
-
-  df$type <- as.factor(df$type)
-  levels(df$type) <- c("LASSO", "Logistic Regression", "Random Forest", "Regression Tree")
-  df$type <- ordered(df$type, levels = c("Logistic Regression", "LASSO", "Random Forest", "Regression Tree"))
-
-  if (type == "train"){
-    ggplot(df, aes(x = "", 
-                   group = type, 
-                   color = type, 
-                   y = as.numeric(specks_train)))+
-      geom_boxplot()+
-      ylab("SPECKS Value")+
-      xlab("")+
-      ggtitle("SPECKS")+
-      scale_color_manual(values=group_colors)+
-      labs(colour="Model Type")+
-      theme_classic()+
-      facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
-  } else{
-    ggplot(df, aes(x = "", 
-                   group = type, 
-                   color = type, 
-                   y = as.numeric(specks_test)))+
-      geom_boxplot()+
-      ylab("SPECKS Value")+
-      xlab("")+
-      ggtitle("SPECKS")+
-      scale_color_manual(values=group_colors)+
-      labs(colour="Model Type")+
-      theme_classic()+
-      facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
-  }
-}
-
-make_pmse_fig <- function(df, level_order, group_colors, type){
-  #levels(as.factor(df$type))
-  df$type <- as.factor(df$type)
-  levels(df$type) <- c("LASSO", "Logistic Regression", "Random Forest", "Regression Tree")
-  df$type <- ordered(df$type, levels = c("Logistic Regression", "LASSO", "Random Forest", "Regression Tree"))
+make_boxplot_fig <- function(df, level_order, group_colors, type, metric, name) {
   
-  if (type == "train"){
-    ggplot(df, aes(x = "", 
-                   group = type, 
-                   color = type, 
-                   y = as.numeric(pmse_train)))+
-      geom_boxplot()+
-      ylab("pMSE Value")+
-      xlab("")+
-      ggtitle("pMSE")+
-      scale_color_manual(values=group_colors)+
-      labs(colour="Model Type")+
-      theme_classic()+
-      facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
-  } else{
-    ggplot(df, aes(x = "", 
-                   group = type, 
-                   color = type, 
-                   y = as.numeric(pmse_test)))+
-      geom_boxplot()+
-      ylab("pMSE Value")+
-      xlab("")+
-      ggtitle("pMSE")+
-      scale_color_manual(values=group_colors)+
-      labs(colour="Model Type")+
-      theme_classic()+
-      facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
-  }
-}
-
-make_auc_fig <- function(df, level_order, group_colors, type){
-  #levels(as.factor(df$type))
+  # take out lasso for pMSE-ratio
+  df$pmse_ratio_test <- log(df$pmse_ratio_test)
+  df$pmse_ratio_train <- log(df$pmse_ratio_train)
+  df$pmse_ratio_test[df$type == "lasso"] <- -1 # put them off the chart
+  df$pmse_ratio_train[df$type == "lasso"] <- -1 # put them off the chart
+    
   df$type <- as.factor(df$type)
   levels(df$type) <- c("LASSO", "Logistic Regression", "Random Forest", "Regression Tree")
-  df$type <- ordered(df$type, levels = c("Logistic Regression", "LASSO", "Random Forest", "Regression Tree"))
+  df$type <- ordered(df$type, levels = c("LASSO", "Logistic Regression", "Random Forest", "Regression Tree"))
   
-  if (type == "train"){
-    ggplot(df, aes(x = "", 
-                   group = type, 
-                   color = type, 
-                   y = as.numeric(auc_train)))+
-      geom_boxplot()+
-      ylab("AUC Value")+
-      xlab("")+
-      ggtitle("AUC")+
-      scale_color_manual(values=group_colors)+
-      labs(colour="Model Type")+
-      theme_classic()+
-      facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
-  } else{
-    ggplot(df, aes(x = "", 
-                   group = type, 
-                   color = type, 
-                   y = as.numeric(auc_test)))+
-      geom_boxplot()+
-      ylab("AUC Value")+
-      xlab("")+
-      ggtitle("AUC")+
-      scale_color_manual(values=group_colors)+
-      labs(colour="Model Type")+
-      theme_classic()+
-      facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
-  }
+  y_var <- paste0(metric, "_", type)  # e.g., "specks_train" or "pmse_train"
+  y_label <- paste0(name)
+
+  #plot_title <- name
+  
+  plot <- ggplot(df, aes(x = "", 
+                 group = type, 
+                 color = type, 
+                 y = as.numeric(get(y_var)))) +
+    geom_boxplot() +
+    ylab(y_label) +
+    xlab("") +
+    #ggtitle(plot_title) +
+    scale_color_manual(values = wes_palette("AsteroidCity1", n = 4)) +  
+    labs(colour = "Model Type") +
+    theme_classic() +
+    facet_wrap(facet = vars(factor(name, level = level_order)), nrow = 1)
+    
+   plot
 }
 ```
 
@@ -141,64 +70,80 @@ Uses output from model_comparison2.qmd (fig1_v2.csv) which has train/test for 10
 ```{r figs1}
 # indicates control (synthetic and confidential data from same distribution), errors with both mean and variance, 
 # errors with correlations, and errors with means
-df <- read.csv("fig1_v2.csv")
+df <- read.csv("data/fig1_v2.csv")
 level_order <- c("Control", "Mean", "Correlation", "All") 
-group_colors <- c("Logistic Regression" ="#361052", "LASSO" = "red", "Regression Tree" = "green", "Random Forest" = "blue")
 
-fig_a = make_specks_fig(df, level_order, group_colors, type = "train")
-fig_b = make_pmse_fig(df, level_order, group_colors, type = "train")
-fig_c = make_auc_fig(df, level_order, group_colors, type = "train")
+fig_a = make_boxplot_fig(df, level_order, group_colors, type = "train", metric = "specks", name = "SPECKS")
+fig_b = make_boxplot_fig(df, level_order, group_colors, type = "train", metric = "pmse", name = "pMSE")
+fig_c = make_boxplot_fig(df, level_order, group_colors, type = "train", metric = "auc", name = "AUC")
+fig_d = make_boxplot_fig(df, level_order, group_colors, type = "train", metric = "pmse_ratio", name = "ln(pMSE-ratio)")
 
 combined_plot <- (fig_a + theme(legend.position = "none")) /
                  (fig_b + theme(legend.position = "none")) /
-                 (fig_c + theme(legend.position = "none")) +
+                 (fig_c + theme(legend.position = "none")) / 
+                 (fig_d + theme(legend.position = "none")) +
                  plot_layout(guides = 'collect') &
-                 theme(legend.position = "right")
-ggsave("figures/fig_s1.pdf", plot = combined_plot, width = 7, height = 6)
-ggsave("figures/fig_s1.png", plot = combined_plot, width = 7, height = 6)
+                 theme(legend.position = "right")&
+  coord_cartesian(ylim=c(0,NA))
+
+ggsave("figures/fig_s1.pdf", plot = combined_plot, width = 7, height = 10)
+ggsave("figures/fig_s1.png", plot = combined_plot, width = 7, height = 10)
 ```
 
 ```{r fig1}
-fig_a = make_specks_fig(df, level_order, group_colors, type = "test")
-fig_b = make_pmse_fig(df, level_order, group_colors, type = "test")
-fig_c = make_auc_fig(df, level_order, group_colors, type = "test")
+fig_a = make_boxplot_fig(df, level_order, group_colors, type = "test", metric = "specks", name = "SPECKS")
+fig_b = make_boxplot_fig(df, level_order, group_colors, type = "test", metric = "pmse", name = "pMSE")
+fig_c = make_boxplot_fig(df, level_order, group_colors, type = "test", metric = "auc", name = "AUC")
+fig_d = make_boxplot_fig(df, level_order, group_colors, type = "test", metric = "pmse_ratio", name = "ln(pMSE-ratio)")
 
 combined_plot <- (fig_a + theme(legend.position = "none")) /
                  (fig_b + theme(legend.position = "none")) /
-                 (fig_c + theme(legend.position = "none")) +
+                 (fig_c + theme(legend.position = "none")) /
+                 (fig_d + theme(legend.position = "none")) +
                  plot_layout(guides = 'collect') &
-                 theme(legend.position = "right")
-ggsave("figures/fig_1.pdf", plot = combined_plot, width = 7, height = 6)
-ggsave("figures/fig_1.png", plot = combined_plot, width = 7, height = 6)
+                 theme(legend.position = "right")&
+  coord_cartesian(ylim=c(0,NA))
+
+ggsave("figures/fig_1.pdf", plot = combined_plot, width = 7, height = 10)
+ggsave("figures/fig_1.png", plot = combined_plot, width = 7, height = 10)
 ```
 
 ```{r figs2}
 df <- read.csv("data/fig2_v2.csv")
-fig_a = make_specks_fig(df, level_order, group_colors, type = "train")
-fig_b = make_pmse_fig(df, level_order, group_colors, type = "train")
-fig_c = make_auc_fig(df, level_order, group_colors, type = "train")
+
+fig_a = make_boxplot_fig(df, level_order, group_colors, type = "train", metric = "specks", name = "SPECKS")
+fig_b = make_boxplot_fig(df, level_order, group_colors, type = "train", metric = "pmse", name = "pMSE")
+fig_c = make_boxplot_fig(df, level_order, group_colors, type = "train", metric = "auc", name = "AUC")
+fig_d = make_boxplot_fig(df, level_order, group_colors, type = "train", metric = "pmse_ratio", name = "ln(pMSE-ratio)")
 
 combined_plot <- (fig_a + theme(legend.position = "none")) /
                  (fig_b + theme(legend.position = "none")) /
-                 (fig_c + theme(legend.position = "none")) +
+                 (fig_c + theme(legend.position = "none")) /
+                 (fig_d + theme(legend.position = "none")) +
                  plot_layout(guides = 'collect') &
-                 theme(legend.position = "right")
-ggsave("figures/fig_s2.pdf", plot = combined_plot, width = 7, height = 6)
-ggsave("figures/fig_s2.png", plot = combined_plot, width = 7, height = 6)
+                 theme(legend.position = "right")&
+  coord_cartesian(ylim=c(0,NA))
+
+ggsave("figures/fig_s2.pdf", plot = combined_plot, width = 7, height = 10)
+ggsave("figures/fig_s2.png", plot = combined_plot, width = 7, height = 10)
 ```
 
 ```{r fig2}
-fig_a = make_specks_fig(df, level_order, group_colors, type = "test")
-fig_b = make_pmse_fig(df, level_order, group_colors, type = "test")
-fig_c = make_auc_fig(df, level_order, group_colors, type = "test")
+fig_a = make_boxplot_fig(df, level_order, group_colors, type = "test", metric = "specks", name = "SPECKS")
+fig_b = make_boxplot_fig(df, level_order, group_colors, type = "test", metric = "pmse", name = "pMSE")
+fig_c = make_boxplot_fig(df, level_order, group_colors, type = "test", metric = "auc", name = "AUC")
+fig_d = make_boxplot_fig(df, level_order, group_colors, type = "test", metric = "pmse_ratio", name = "ln(pMSE-ratio)")
 
 combined_plot <- (fig_a + theme(legend.position = "none")) /
                  (fig_b + theme(legend.position = "none")) /
-                 (fig_c + theme(legend.position = "none")) +
+                 (fig_c + theme(legend.position = "none")) /
+                 (fig_d + theme(legend.position = "none")) +
                  plot_layout(guides = 'collect') &
-                 theme(legend.position = "right")
-ggsave("figures/fig_2.pdf", plot = combined_plot, width = 7, height = 6)
-ggsave("figures/fig_2.png", plot = combined_plot, width = 7, height = 6)
+                 theme(legend.position = "right")&
+  coord_cartesian(ylim=c(0,NA))
+
+ggsave("figures/fig_2.pdf", plot = combined_plot, width = 7, height = 10)
+ggsave("figures/fig_2.png", plot = combined_plot, width = 7, height = 10)
 ```
 
 ```{r fig3456_func}
@@ -225,9 +170,9 @@ make_fig3456 <- function(df, metric, group){
       scale_color_discrete(name = "Group", labels = c("Over", "Under"))
   }
   if ((group == "race") && (metric == "AUC")){
-    df$BLACK_class <- factor(df$BLACK_class, levels = c("noBLACK", "BLACK"))
+    df$black_class <- factor(df$black_class, levels = c("noblack", "black"))
     df$synth_type = factor(df$synth_type, levels = c("noBLACK_bad", "noBLACK_med", "good", "BLACK_med", "BLACK_bad"))
-    plot <- ggplot(df, aes(x = synth_type, y = aucs, color = BLACK_class))+
+    plot <- ggplot(df, aes(x = synth_type, y = aucs, color =black_class))+
       geom_point(alpha = .5)+
       ylab("AUC")+
       xlab("Synthesis Type")+
@@ -236,9 +181,9 @@ make_fig3456 <- function(df, metric, group){
       scale_color_discrete(name = "Group", labels = c("White", "Black"))
   }
   if ((group == "race") && (metric == "SPECKS")){
-    df$BLACK_class <- factor(df$BLACK_class, levels = c("noBLACK", "BLACK"))
+    df$black_class <- factor(df$black_class, levels = c("noblack", "black"))
     df$synth_type = factor(df$synth_type, levels = c("noBLACK_bad", "noBLACK_med", "good", "BLACK_med", "BLACK_bad"))
-    plot <- ggplot(df, aes(x = synth_type, y = speckss, color = BLACK_class))+
+    plot <- ggplot(df, aes(x = synth_type, y = speckss, color = black_class))+
       geom_point(alpha = .5)+
       ylab("SPECKS")+
       xlab("Synthesis Type")+
@@ -308,7 +253,7 @@ plot <- read.csv("data/pmse_ratio_pov.csv")
 
 plot$synth_type = factor(plot$synth_type, levels = c("nopov_bad", "nopov_med", "good", "pov_med", "pov_bad"))
 
-plot_pov <- ggplot(plot, aes(x = synth_type, group = pov_class, y = pmse, color = pov_class))+
+plot_pov <- ggplot(plot, aes(x = synth_type, group = pov_class, y = log(pmse), color = pov_class))+
   geom_point(alpha = .5)+
   #geom_pointrange(aes(ymin = lows, ymax = highs))+
   ylab("log(pMSE-Ratio)")+
@@ -317,18 +262,37 @@ plot_pov <- ggplot(plot, aes(x = synth_type, group = pov_class, y = pmse, color 
   scale_x_discrete(labels = c("Over-poor", "Over-fair", "Poverty-good", "Under-fair", "Under-poor"))+
   scale_color_discrete(name = "Group", labels = c("Over", "Under"))+
   scale_y_log10()
+plot_pov
+#ggsave("figures/fig_7.pdf", plot = plot_pov, width = 6, height = 4)
+#ggsave("figures/fig_7.png", plot = plot_pov, width = 6, height = 4)
+```
 
-ggsave("figures/fig_7.pdf", plot = plot_pov, width = 6, height = 4)
-ggsave("figures/fig_7.png", plot = plot_pov, width = 6, height = 4)
+```{r fig8}
+plot_adj <- read.csv("data/pmse_ratio_adjusted_race.csv")
+
+plot_adj$synth_type = factor(plot_adj$synth_type, levels = c("noblack_bad", "noblack_med", "good", "black_med", "black_bad"))
+plot_adj$black_class <- factor(plot_adj$black_class, levels = c("noblack", "black"))
+
+plot_race <- ggplot(plot_adj, aes(x = synth_type, y = pmse, color = black_class))+
+  geom_point(alpha = .5)+
+  ylab("log(Adjusted pMSE-ratio)")+
+  xlab("Synthesis Type")+
+  theme_classic()+
+  scale_x_discrete(labels = c("White-poor", "White-fair", "Race-good", "Black-fair", "Black-poor"))+
+  scale_color_discrete(name = "Group", labels = c("White", "Black"))+
+  scale_y_log10()
+plot_race
+#ggsave("figures/fig_8.pdf", plot = plot_pov, width = 6, height = 4)
+#ggsave("figures/fig_8.png", plot = plot_pov, width = 6, height = 4)
 ```
 
 ```{r fig8}
 plot <- read.csv("data/pmse_ratio_race.csv")
 
-plot$synth_type = factor(plot$synth_type, levels = c("noBLACK_bad", "noBLACK_med", "good", "BLACK_med", "BLACK_bad"))
-plot$BLACK_class <- factor(plot$BLACK_class, levels = c("noBLACK", "BLACK"))
+plot$synth_type = factor(plot$synth_type, levels = c("noblack_bad", "noblack_med", "good", "black_med", "black_bad"))
+plot$black_class <- factor(plot$black_class, levels = c("noblack", "black"))
 
-plot_pov <- ggplot(plot, aes(x = synth_type, y = pmse, color = BLACK_class))+
+plot_race <- ggplot(plot, aes(x = synth_type, y = log(pmse), color = black_class))+
   geom_point(alpha = .5)+
   ylab("log(pMSE-Ratio)")+
   xlab("Synthesis Type")+
@@ -336,8 +300,7 @@ plot_pov <- ggplot(plot, aes(x = synth_type, y = pmse, color = BLACK_class))+
   scale_x_discrete(labels = c("White-poor", "White-fair", "Race-good", "Black-fair", "Black-poor"))+
   scale_color_discrete(name = "Group", labels = c("White", "Black"))+
   scale_y_log10()
-
-ggsave("figures/fig_8.pdf", plot = plot_pov, width = 6, height = 4)
-ggsave("figures/fig_8.png", plot = plot_pov, width = 6, height = 4)
+plot_race
+#ggsave("figures/fig_8.pdf", plot = plot_pov, width = 6, height = 4)
+#ggsave("figures/fig_8.png", plot = plot_pov, width = 6, height = 4)
 ```
-
