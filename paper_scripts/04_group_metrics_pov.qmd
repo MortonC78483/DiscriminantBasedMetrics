@@ -35,8 +35,8 @@ library(MASS)
 library(caret)
 library(gt)
 library(ggpubr)
-source("../add_pmse_group.R")
-source("../permutation_sig.R")
+#source("../add_pmse_group.R")
+#source("../permutation_sig.R")
 source('00_functions.R')
 set.seed(78483)
 ```
@@ -52,11 +52,11 @@ times = 10
 ```
 
 ```{r}
-one_model_df <- data.frame(matrix(ncol = 4, nrow = 0))
-colnames(one_model_df) <- c("aucs", "speckss", "synth_type", "pov_class")
+one_model_df <- data.frame(matrix(ncol = 6, nrow = 0))
+colnames(one_model_df) <- c("aucs", "speckss", "pmses", "pmse_ratios", "synth_type", "pov_class")
 
-two_model_df <- data.frame(matrix(ncol = 4, nrow = 0))
-colnames(two_model_df) <- c("aucs", "speckss", "synth_type", "pov_class")
+two_model_df <- data.frame(matrix(ncol = 6, nrow = 0))
+colnames(two_model_df) <- c("aucs", "speckss", "pmses", "pmse_ratios", "synth_type", "pov_class")
 ```
 
 ```{r}

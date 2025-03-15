@@ -111,7 +111,7 @@ colnames(df) = c("pmse_train", "specks_train", "auc_train", "pmse_ratio_train", 
 
 Write to csv
 ```{r}
-write.csv(df, "data/fig1_v2.csv")
+write.csv(df, "data/fig1.csv")
 ```
 
 
@@ -165,5 +165,5 @@ group_colors <- c(lr ="#361052", tree = "green", lasso = "red", rf = "blue")
 
 Write to csv
 ```{r}
-write.csv(df, "data/fig2_v2.csv")
+write.csv(df, "data/fig2.csv")
 ```

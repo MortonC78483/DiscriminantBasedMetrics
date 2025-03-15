@@ -1,0 +1,136 @@
+---
+  title: "05_pairwise_calculations"
+  format:
+  html:
+  theme: default
+---
+  
+  Based on (https://arxiv.org/pdf/2109.12717.pdf), this script creates pairwise analysis figures for one of the "medium" quality syntheses. It demonstrates that the approach in Raab et al., while working well in their paper, does not sufficiently indicate which variable has poor synthesis quality here. This is likely because in this setting, many of the variables are binary, allowing models fit with pairs of these variables to only have four possible outcomes. These results are not shown in the paper but are included here for completeness.
+
+```{r, echo = F}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all("../../syntheval")
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+source('00_functions.R')
+set.seed(78483)
+```
+
+Getting the input data
+```{r}
+# load data
+data_mi <- read_csv("data/data_mi.csv")
+data_mi <- as.data.frame(unclass(data_mi),stringsAsFactors=TRUE)
+data_mi$pov <- as.factor(data_mi$pov)
+data_mi$black <- as.factor(data_mi$black)
+# reorder columns
+data_mi = data_mi %>%
+  dplyr::select(c(pov, SEX, VETSTAT, EMPSTAT, EDUC, HCOVANY, black, FTOTINC, AGE))
+```
+
+Making one round of synthetic datasets
+```{r}
+synth_list = make_all_synth_datasets(data_mi, "pov")
+```
+
+Pull the synthetic dataset of interest
+```{r}
+synth_pov_med = synth_list[[2]]
+synthesized <- synth_pov_med#discrimination(synth_pov_med, data_mi)
+synthesized$synthetic_data <- synthesized$synthetic_data %>%
+  dplyr::select(c(pov, SEX, VETSTAT, EMPSTAT, EDUC, HCOVANY, black, FTOTINC, AGE))
+```
+
+Getting pairs of variables (only need each pair once)
+
+For each pair, create a model that uses only those two variables, calculate the discriminant-based metrics, and record the AUC and pMSE from a tree model (not the random forest model).
+```{r}
+calc_metrics <- function(discriminator){
+  # Evaluate discriminant-based metrics on the data using tree-based model
+  tree_mod <- decision_tree(cost_complexity = tune()) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "rpart")
+  
+  rpart_rec <- recipe(.source_label ~ ., data = discriminator$combined_data)
+  
+  grid = grid_regular(cost_complexity(), levels= 10)
+  
+  # set up discriminator
+  d <- discriminator %>%
+    add_propensities_tuned(
+      grid = grid, 
+      recipe = rpart_rec,
+      spec = tree_mod
+    ) %>%
+    add_discriminator_auc() %>%
+    add_specks() %>%
+    add_pmse()
+  res = c(d$discriminator_auc, d$pmse, d$specks)
+  return(c(res$.estimate[2], res$.pmse[2], res$.specks[2]))
+}
+```
+
+
+
+```{r}
+auc_mat <- matrix(0, ncol(data_mi), ncol(data_mi))
+pmse_mat <- matrix(0, ncol(data_mi), ncol(data_mi))
+specks_mat <- matrix(0, ncol(data_mi), ncol(data_mi))
+```
+
+```{r}
+n = ncol(data_mi)
+for (i in 1:(n-1)){
+  for (j in (i+1):n){
+    pair_synthesized = synthesized$synthetic_data[,c(i,j)]
+    pair_conf = data_mi[,c(i,j)]
+    disc = discrimination(pair_synthesized, pair_conf)
+    res = calc_metrics(disc)
+    auc_mat[i,j] = res[1]
+    pmse_mat[i,j] = res[2]
+    specks_mat[i,j] = res[3]
+  }
+}
+```
+
+Plotting the matrices as heatmaps
+```{r}
+new_auc_mat = auc_mat
+new_auc_mat[new_auc_mat == 0] <- NA
+rownames(new_auc_mat) <- c("pov", "SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "black", "FTOTINC", "AGE")
+colnames(new_auc_mat) <- c("pov", "SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "black", "FTOTINC", "AGE")
+new_auc_mat = reshape2::melt(new_auc_mat)
+ggplot(new_auc_mat, aes(Var1, Var2, fill = value))+
+  geom_tile()+
+  theme_classic()
+
+new_pmse_mat = pmse_mat
+new_pmse_mat[new_pmse_mat == 0] <- NA
+rownames(new_pmse_mat) <- c("pov", "SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "black", "FTOTINC", "AGE")
+colnames(new_pmse_mat) <- c("pov", "SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "black", "FTOTINC", "AGE")
+new_pmse_mat = reshape2::melt(new_pmse_mat)
+ggplot(new_pmse_mat, aes(Var1, Var2, fill = value))+
+  geom_tile()+
+  theme_classic()
+
+new_specks_mat = specks_mat
+new_specks_mat[new_specks_mat == 0] <- NA
+rownames(new_specks_mat) <- c("pov", "SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "black", "FTOTINC", "AGE")
+colnames(new_specks_mat) <- c("pov", "SEX", "VETSTAT", "EMPSTAT", "EDUC", "HCOVANY", "black", "FTOTINC", "AGE")
+new_specks_mat = reshape2::melt(new_specks_mat)
+ggplot(new_specks_mat, aes(Var1, Var2, fill = value))+
+  geom_tile()+
+  theme_classic()
+```

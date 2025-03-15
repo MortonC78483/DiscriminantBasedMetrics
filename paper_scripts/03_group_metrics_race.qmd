@@ -50,11 +50,13 @@ times <- 10 # set this to 1 for time -- it is 10 in real paper
 ```
 
 ```{r}
-one_model_df <- data.frame(matrix(ncol = 4, nrow = 0))
-colnames(one_model_df) <- c("aucs", "speckss", "synth_type", "pov_class")
+one_model_df <- data.frame(matrix(ncol = 6, nrow = 0))
+colnames(one_model_df) <- c("aucs", "speckss", "pmses", "pmse_ratios", "synth_type", "black_class")
 
-two_model_df <- data.frame(matrix(ncol = 4, nrow = 0))
-colnames(two_model_df) <- c("aucs", "speckss", "synth_type", "pov_class")
+
+two_model_df <- data.frame(matrix(ncol = 6, nrow = 0))
+colnames(two_model_df) <- c("aucs", "speckss", "pmses", "pmse_ratios", "synth_type", "black_class")
+
 ```
 
 ```{r}
