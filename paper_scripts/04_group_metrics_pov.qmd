@@ -1,0 +1,105 @@
+---
+title: "group_metrics_pov"
+format: pdf
+---
+
+/*************************/
+Programmer: Claire Morton
+Date created: 06/12/2024
+Date of last revision: 09/30/2024
+original data: Pulls the processed ACS dataset, data_mi.csv
+
+Description: This script synthesizes datasets of varying utilities along poverty lines and runs the single- and dual-model approaches to assess the utility of the input data
+
+(1) Synthesize datasets
+(2) Fit one- and two-model approaches, get and save metric values
+(3) save metrics from several runs in "data/one_model_df_pov.csv" and "data/two_model_df_pov.csv"
+
+/*************************/
+
+
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all("../../syntheval")
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+#source("../add_pmse_group.R")
+#source("../permutation_sig.R")
+source('00_functions.R')
+set.seed(78483)
+```
+
+
+```{r}
+# load data
+data_mi <- read_csv("data/data_mi.csv")
+data_mi <- as.data.frame(unclass(data_mi),stringsAsFactors=TRUE)
+data_mi$pov <- as.factor(data_mi$pov)
+data_mi$black <- as.factor(data_mi$black)
+times = 10
+```
+
+```{r}
+one_model_df <- data.frame(matrix(ncol = 6, nrow = 0))
+colnames(one_model_df) <- c("aucs", "speckss", "pmses", "pmse_ratios", "synth_type", "pov_class")
+
+two_model_df <- data.frame(matrix(ncol = 6, nrow = 0))
+colnames(two_model_df) <- c("aucs", "speckss", "pmses", "pmse_ratios", "synth_type", "pov_class")
+```
+
+```{r}
+# takes a long time to run
+for (time in 1:times){
+  synth_list = make_all_synth_datasets(data_mi, "pov")
+  
+  synth_pov_good = synth_list[[1]]$synthetic_data
+  synth_pov_good <- process_data(synth_pov_good, "pov")
+  list_dfs <- get_nums(synth_pov_good, data_mi, calc_disc, "good", "pov")
+  one_model_df <- rbind(one_model_df, list_dfs[[1]])
+  two_model_df <- rbind(two_model_df, list_dfs[[2]])
+  
+  synth_pov_med = synth_list[[2]]$synthetic_data
+  synth_pov_med <- process_data(synth_pov_med, "pov")
+  list_dfs <- get_nums(synth_pov_med, data_mi, calc_disc, "pov_med", "pov")
+  one_model_df <- rbind(one_model_df, list_dfs[[1]])
+  two_model_df <- rbind(two_model_df, list_dfs[[2]])
+  
+  synth_pov_bad = synth_list[[3]]$synthetic_data
+  synth_pov_bad <- process_data(synth_pov_bad, "pov")
+  list_dfs <- get_nums(synth_pov_bad, data_mi, calc_disc, "pov_bad", "pov")
+  one_model_df <- rbind(one_model_df, list_dfs[[1]])
+  two_model_df <- rbind(two_model_df, list_dfs[[2]])
+  
+  synth_nopov_med = synth_list[[4]]$synthetic_data
+  synth_nopov_med <- process_data(synth_nopov_med, "pov")
+  list_dfs <- get_nums(synth_nopov_med, data_mi, calc_disc, "nopov_med", "pov")
+  one_model_df <- rbind(one_model_df, list_dfs[[1]])
+  two_model_df <- rbind(two_model_df, list_dfs[[2]])
+  
+  synth_nopov_bad = synth_list[[5]]$synthetic_data
+  synth_nopov_bad <- process_data(synth_nopov_bad, "pov")
+  list_dfs <- get_nums(synth_nopov_bad, data_mi, calc_disc, "nopov_bad", "pov")
+  one_model_df <- rbind(one_model_df, list_dfs[[1]])
+  two_model_df <- rbind(two_model_df, list_dfs[[2]])
+  
+  print(time)
+}
+```
+
+Save dataframes
+```{r}
+write.csv(one_model_df, "data/one_model_df_pov.csv")
+write.csv(two_model_df, "data/two_model_df_pov.csv")
+```
