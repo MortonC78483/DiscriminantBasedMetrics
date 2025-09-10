@@ -1,0 +1,169 @@
+---
+title: "model_comparison"
+format: pdf
+---
+
+/*************************/
+Programmer: Claire Morton
+Date created: 06/10/2024
+Date of last revision: 10/10/2024
+original data: Does not import any data
+
+Description: This script creates example pairs of synthetic and confidential data and runs a variety of models on them to demonstrate model strengths and weaknesses. It outputs "data/fig1_v2.csv," and "data/fig2_v2.csv," which are both used by later scripts. 
+ 
+In this part of the project, we examine whether different models to calculate discriminant-based metrics are (or are not) picking up on specific underlying issues in the synthetic datasets. To do this, we synthesize synthetic datasets with known issues. These datasets have the issues either in every row or in a minority of the rows. Then, we fit several models to calculate discriminant-based metrics to assess the global utility of the synthetic datasets. This script saves the metric values, which we plot in "make_figures.Rmd." Steps of this script are:
+  
+(1) Functions to generate synthetic datasets with different errors, models that will be fit to data
+(2) Synthesize 10 datasets for each issue type, run all models to calculate all discriminant-based metrics
+  (a) Datasets have the issue in every row.
+  (b) Datasets have the issue in a minority of rows.
+
+/*************************/
+
+```{r setup}
+library(tidyverse)
+library(ipumsr)
+library(srvyr)
+library(tidysynthesis)
+library(parsnip)
+library("data.table")
+library(recipes)
+library(devtools)
+load_all('../../syntheval')
+library(syntheval)
+library(dials)
+library(tune)
+library(gtools)
+library(MASS)
+library(caret)
+library(gt)
+library(ggpubr)
+library(yardstick)
+source('00_functions.R')
+
+set.seed(78483)
+```
+
+(1) Models that will be fit to data
+
+```{r}
+# create models
+tree_mod <- decision_tree(cost_complexity = tune()) %>%
+  set_mode(mode = "classification") %>%
+  set_engine(engine = "rpart")
+
+lr_mod <- logistic_reg(engine = "glm") %>%
+  set_mode(mode = "classification")
+
+lasso_mod <- logistic_reg(penalty = tune(), mixture = 1) %>%
+    set_mode(mode = "classification") %>%
+    set_engine(engine = "glmnet")  
+
+rf_mod <- rand_forest(
+    mode = "classification",
+    engine = "randomForest",
+    mtry = NULL,
+    trees = NULL,
+    min_n = NULL
+)
+```
+
+```{r}
+n=10000 # number of samples
+corr=.7 # correlation
+p = 10 # number of variables
+times = 10# number of replicates
+props = 1 # proportion of data to manipulate (for simulated synthetic datasets)
+df = data.frame(NULL)
+
+for (time in 1:times){
+  controls = generate_controls(p, corr, n)
+  conf1 = controls[[1]]
+  synth1 = controls[[2]]
+  alloff = generate_alloff(p, corr, n)
+  conf2 = alloff[[1]]
+  synth2 = alloff[[2]]
+  mean = generate_mean(p, corr, n)
+  conf3 = mean[[1]]
+  synth3 = mean[[2]]
+  var = generate_var(p, corr, n)
+  conf4 = var[[1]]
+  synth4 = var[[2]]
+  
+  # iterate through all of the model pairs
+  pairs <- list(list(synth1, conf1, "Control"),
+                list(synth2, conf2, "All"),
+                list(synth3, conf3, "Mean"),
+                list(synth4, conf4, "Correlation"))
+  
+  for (elem in pairs) {
+    # for each type of pairing, evaluate model
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], lr_mod, "lr", elem[[3]], "none"))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], tree_mod, "tree", elem[[3]], "cp"))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], lasso_mod, "lasso", elem[[3]], "penalty"))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], rf_mod, "rf", elem[[3]], "none"))
+  }
+  print(time)
+}
+  
+colnames(df) = c("pmse_train", "specks_train", "auc_train", "pmse_ratio_train", "pmse_test", "specks_test", "auc_test", "pmse_ratio_test", "type", "name")
+```
+
+Write to csv
+```{r}
+write.csv(df, "data/fig1_v2.csv")
+```
+
+
+Majority/minority split and discriminant-based metric calculation
+Sample 10% of data from each bad synthetic dataset, 90% from the same distribution as confidential dataset
+
+```{r}
+n=10000 # number of samples
+corr=.7 # correlation
+p = 10 # number of variables
+times = 10
+prop = .1
+df = data.frame(NULL)
+
+for (time in 1:times){
+  controls = generate_controls(p, corr, n)
+  conf1 = controls[[1]]
+  synth1 = controls[[2]]
+  alloff = generate_alloff(p, corr, n, prop = prop)
+  conf2 = alloff[[1]]
+  synth2 = alloff[[2]]
+  mean = generate_mean(p, corr, n, prop = prop)
+  conf3 = mean[[1]]
+  synth3 = mean[[2]]
+  var = generate_var(p, corr, n, prop = prop)
+  conf4 = var[[1]]
+  synth4 = var[[2]]
+  
+  # iterate through all of the model pairs we've got
+  pairs <- list(list(synth1, conf1, "Control"),
+             list(synth2, conf2, "All"),
+             list(synth3, conf3, "Mean"),
+             list(synth4, conf4, "Correlation"))
+  
+  for (elem in pairs) {
+    # for each type of pairing, we need to evaluate both model types on cont and cat data
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], lr_mod, "lr", elem[[3]], "none"))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], tree_mod, "tree", elem[[3]], "cp"))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], lasso_mod, "lasso", elem[[3]], "penalty"))
+    df = rbind(df, make_disc(elem[[1]], elem[[2]], rf_mod, "rf", elem[[3]], "none"))
+  }
+}
+  
+colnames(df) = c("pmse_train", "specks_train", "auc_train", "pmse_ratio_train", "pmse_test", "specks_test", "auc_test", "pmse_ratio_test", "type", "name")
+
+# indicates control (synthetic and confidential data from same distribution), errors with both mean and variance, 
+# errors with correlations, and errors with means
+level_order <- c("Control", "All", "Correlation", "Mean") 
+group_colors <- c(lr ="#361052", tree = "green", lasso = "red", rf = "blue")
+```
+
+Write to csv
+```{r}
+write.csv(df, "data/fig2_v2.csv")
+```

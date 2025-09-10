@@ -1,0 +1,20 @@
+---
+title: "test_file"
+author: "Claire Morton"
+date: "2/9/2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(readr)
+set.seed(1)
+```
+
+```{r}
+rnorm(1)
+
+```
+
+```{r}
+rnorm(1)
+```
